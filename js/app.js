@@ -585,6 +585,113 @@ function renderDashboard() {
 
   renderTablaDesfacePorFrente(totalPresupuesto, hoy);
   renderGantt();
+  renderControlAvance(totalPresupuesto, hoy);
+}
+
+// ---------------------------------------------------------
+// Pestaña "Control de Avance": KPIs gerenciales
+// ---------------------------------------------------------
+let ctrlCurvaInstance = null, ctrlMensualInstance = null;
+
+function renderControlAvance(totalPresupuesto, hoy) {
+  const kpis = document.getElementById("ctrlKpis");
+  if (!kpis) return;
+  const fmtM = v => "S/ " + (v / 1e6).toLocaleString("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " M";
+  const pct = v => v.toLocaleString("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  const hay = !!REVISION_ACTIVA;
+  const peso = p => totalPresupuesto > 0 ? (p.presupuesto_total || 0) / totalPresupuesto : 0;
+  const totalOrig = PARTIDAS.reduce((s, p) => s + (p.orig_presupuesto_total ?? p.presupuesto_total ?? 0), 0);
+  const pesoO = p => totalOrig > 0 ? (p.orig_presupuesto_total ?? p.presupuesto_total ?? 0) / totalOrig : 0;
+  const iniO = p => p.orig_fecha_inicio_base || p.fecha_inicio_base;
+  const finO = p => p.orig_fecha_fin_base || p.fecha_fin_base;
+  const planO = (p, f) => avancePlanificadoEnFecha({ ...p, fecha_inicio_base: iniO(p), fecha_fin_base: finO(p) }, f);
+
+  const econReal = PARTIDAS.reduce((s, p) => s + peso(p) * avanceRealAcumuladoEnFecha(p.id, hoy), 0) * 100;
+  const econPlan = PARTIDAS.reduce((s, p) => s + peso(p) * avancePlanificadoEnFecha(p, hoy), 0) * 100;
+  const desface = econReal - econPlan;
+  const frentes = [...new Set(PARTIDAS.map(p => p.frente))];
+  const inicioObra = PARTIDAS.reduce((m, p) => (!m || p.fecha_inicio_base < m) ? p.fecha_inicio_base : m, null);
+  const finVig = PARTIDAS.reduce((m, p) => (!m || p.fecha_fin_base > m) ? p.fecha_fin_base : m, null);
+  const finOrig = PARTIDAS.reduce((m, p) => (!m || finO(p) > m) ? finO(p) : m, null);
+  const plazo = inicioObra && finVig ? Math.round((new Date(finVig) - new Date(inicioObra)) / 86400000) : 0;
+  const deltaFin = (finOrig && finVig) ? Math.round((new Date(finVig) - new Date(finOrig)) / 86400000) : 0;
+
+  // meses
+  const meses = [];
+  if (inicioObra) {
+    const fin = new Date([finVig, finOrig, hoy].reduce((a, b) => a > b ? a : b));
+    let d = new Date(inicioObra); d = new Date(d.getFullYear(), d.getMonth(), 1);
+    while (d <= fin) {
+      const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      meses.push(ultimo.toISOString().slice(0, 10));
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
+  }
+  const cumO = meses.map(f => PARTIDAS.reduce((s, p) => s + pesoO(p) * planO(p, f), 0) * 100);
+  const cumV = meses.map(f => PARTIDAS.reduce((s, p) => s + peso(p) * avancePlanificadoEnFecha(p, f), 0) * 100);
+  const cumR = meses.map(f => f <= hoy || f.slice(0, 7) === hoy.slice(0, 7)
+    ? PARTIDAS.reduce((s, p) => s + peso(p) * avanceRealAcumuladoEnFecha(p.id, f > hoy ? hoy : f), 0) * 100 : null);
+  const brecha = hay ? Math.max(...cumO.map((v, i) => v - cumV[i])) : 0;
+  const brechaMonto = totalPresupuesto * brecha / 100;
+
+  document.getElementById("ctrlAviso").style.display = hay ? "" : "none";
+  if (hay) document.getElementById("ctrlAviso").innerHTML = `Línea base vigente: <b>${escapeHtml(REVISION_ACTIVA.nombre)}</b>. Se compara contra el contrato original (LB00).`;
+
+  const tile = (l, v, cls) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${cls || ""}">${v}</div></div>`;
+  kpis.innerHTML =
+    tile("Presupuesto controlado", fmtM(totalPresupuesto)) +
+    tile("Partidas / Frentes", PARTIDAS.length.toLocaleString("es-PE") + " / " + frentes.length) +
+    tile("Plazo (días)", plazo) +
+    tile("Avance económico real", pct(econReal)) +
+    tile("Planificado a hoy", pct(econPlan)) +
+    tile("Desface económico", (desface >= 0 ? "+" : "") + pct(desface), desface >= 0 ? "good" : "bad") +
+    (hay ? tile("Fin de obra vs. LB00", (deltaFin >= 0 ? "+" : "") + deltaFin + " días", deltaFin > 0 ? "bad" : "good") +
+           tile("Brecha máx. LB00 vs. vigente", pct(brecha) + " · " + fmtM(brechaMonto), "bad") : "");
+
+  // Curva S
+  const labels = meses.map(f => new Date(f + "T12:00:00").toLocaleDateString("es-PE", { month: "short", year: "2-digit" }));
+  if (ctrlCurvaInstance) ctrlCurvaInstance.destroy();
+  const dsCurva = [{ label: "LB00 · contrato original", data: cumO, borderColor: "#2a78d6", backgroundColor: "transparent", borderWidth: 3, tension: 0.2, pointRadius: 2 }];
+  if (hay) dsCurva.push({ label: "Vigente · " + REVISION_ACTIVA.nombre, data: cumV, borderColor: "#e07b22", backgroundColor: "transparent", borderWidth: 3, tension: 0.2, pointRadius: 2 });
+  dsCurva.push({ label: "Avance real", data: cumR, borderColor: "#1baf7a", backgroundColor: "rgba(27,175,122,0.1)", fill: true, borderWidth: 3, tension: 0.2, pointRadius: 3, spanGaps: false });
+  ctrlCurvaInstance = new Chart(document.getElementById("ctrlCurvaChart").getContext("2d"), {
+    type: "line", data: { labels, datasets: dsCurva },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 100, ticks: { callback: v => v + "%" } } } },
+  });
+
+  // Producción mensual
+  const dif = a => a.map((v, i) => v === null ? null : (v - (i > 0 && a[i - 1] !== null ? a[i - 1] : 0)) * totalPresupuesto / 100 / 1e6);
+  const dsMes = [{ label: "LB00", data: dif(cumO), backgroundColor: "#2a78d6" }];
+  if (hay) dsMes.push({ label: "Vigente", data: dif(cumV), backgroundColor: "#e07b22" });
+  dsMes.push({ label: "Real", data: dif(cumR), backgroundColor: "#1baf7a" });
+  if (ctrlMensualInstance) ctrlMensualInstance.destroy();
+  ctrlMensualInstance = new Chart(document.getElementById("ctrlMensualChart").getContext("2d"), {
+    type: "bar", data: { labels, datasets: dsMes },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { callback: v => v + " M" } } } },
+  });
+
+  // Presupuesto por especialidad
+  const esp = {};
+  PARTIDAS.forEach(p => { const k = (p.frente.split(" — ")[1] || p.frente); esp[k] = (esp[k] || 0) + (p.presupuesto_total || 0); });
+  const espArr = Object.entries(esp).sort((a, b) => b[1] - a[1]);
+  const maxE = espArr.length ? espArr[0][1] : 1;
+  document.getElementById("ctrlEspecialidades").innerHTML = espArr.map(([k, v]) => `
+    <div style="display:flex; align-items:center; gap:10px; margin:6px 0; font-size:13px;">
+      <div style="width:170px;">${escapeHtml(k)}</div>
+      <div style="flex:1;"><div style="height:16px; width:${Math.max(v / maxE * 100, 0.5)}%; background:#2a78d6; border-radius:4px;"></div></div>
+      <div style="width:150px; text-align:right;"><b>${fmtM(v)}</b> · ${totalPresupuesto > 0 ? (v / totalPresupuesto * 100).toFixed(1) : 0}%</div>
+    </div>`).join("");
+
+  // Tabla de plazo por frente
+  const tb = document.querySelector("#ctrlTablaPlazo tbody");
+  tb.innerHTML = frentes.sort().map(f => {
+    const ps = PARTIDAS.filter(p => p.frente === f);
+    const pres = ps.reduce((s, p) => s + (p.presupuesto_total || 0), 0);
+    const fo = ps.reduce((m, p) => finO(p) > m ? finO(p) : m, "");
+    const fv = ps.reduce((m, p) => p.fecha_fin_base > m ? p.fecha_fin_base : m, "");
+    const dd = Math.round((new Date(fv) - new Date(fo)) / 86400000);
+    return `<tr><td>${escapeHtml(f)}</td><td>${fmtM(pres)}</td><td>${fmtDate(fo)}</td><td>${fmtDate(fv)}</td><td style="color:${dd > 0 ? "var(--red)" : "inherit"}">${dd > 0 ? "+" + dd + " días" : "Sin cambio"}</td></tr>`;
+  }).join("");
 }
 
 function lineChartConfig(labels, planData, realData, colorPlan, colorReal, fillReal, planOriginalData) {
