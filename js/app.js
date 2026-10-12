@@ -12,6 +12,7 @@ let MIS_FRENTES = [];       // frentes asignados al usuario logueado (solo aplic
 let REVISIONES = [];        // revisiones_linea_base del proyecto (LB01, LB02, ...)
 let REVISION_ACTIVA = null; // la revision marcada activa=true, o null si se usa la original (LB00)
 let REVISION_EDITANDO = null; // revision que se esta editando en la pestaña "Líneas Base" (no necesariamente la activa)
+let VIENDO_ORIGINAL = false;  // true = la pestaña "Líneas Base" esta mostrando LB00 (solo lectura)
 let OVERRIDES_ACTIVA = {};  // partida_id -> fila de partidas_revision de la revision ACTIVA
 let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la revision que se esta EDITANDO
 
@@ -811,7 +812,8 @@ async function renderLineasBaseTab(proyectoId) {
   if (!wrap) return;
 
   if (REVISION_EDITANDO && !REVISIONES.find(r => r.id === REVISION_EDITANDO.id)) REVISION_EDITANDO = null;
-  if (!REVISION_EDITANDO && REVISIONES.length > 0) REVISION_EDITANDO = REVISION_ACTIVA || REVISIONES[REVISIONES.length - 1];
+  if (!REVISION_EDITANDO && !VIENDO_ORIGINAL && REVISIONES.length > 0) REVISION_EDITANDO = REVISION_ACTIVA || REVISIONES[REVISIONES.length - 1];
+  if (REVISION_EDITANDO) VIENDO_ORIGINAL = false;
   await loadOverridesEditando();
 
   let html = `<div class="card" style="margin-bottom:12px;">
@@ -822,12 +824,23 @@ async function renderLineasBaseTab(proyectoId) {
       </select>
       <button class="small-btn primary" id="btnNuevaRevision">+ Nueva línea base</button>
       ${REVISION_EDITANDO ? `<button class="small-btn" id="btnActivarRevision" ${REVISION_EDITANDO.activa ? "disabled" : ""}>${REVISION_EDITANDO.activa ? "Es la activa" : "Activar esta línea base"}</button>` : ""}
-      ${REVISION_EDITANDO && REVISION_EDITANDO.activa ? `<button class="small-btn" id="btnDesactivarRevision">Volver a LB00 original</button>` : ""}
+      ${(REVISION_EDITANDO && REVISION_EDITANDO.activa) || (!REVISION_EDITANDO && REVISION_ACTIVA) ? `<button class="small-btn" id="btnDesactivarRevision">Usar LB00 como línea base oficial</button>` : ""}
     </div>
     <p class="save-hint">${REVISION_EDITANDO
       ? escapeHtml(REVISION_EDITANDO.motivo || "Sin motivo registrado") + " — creada " + fmtDate(REVISION_EDITANDO.fecha_creacion)
-      : "Mostrando la línea base original (contractual). Selecciona o crea una revisión para editar fechas/metrados/P.U. sin tocar el original."}</p>
+      : "Línea base original (LB00, contractual): solo lectura. " + (REVISION_ACTIVA ? "La línea base oficial hoy es " + escapeHtml(REVISION_ACTIVA.nombre) + "." : "Es la línea base oficial hoy.")}</p>
   </div>`;
+
+  if (!REVISION_EDITANDO) {
+    html += `<div class="card">
+      <h2>Línea base original (LB00) — valores contractuales</h2>
+      <input type="text" id="buscarPartidaOriginal" placeholder="Buscar partida o frente..." style="width:100%; margin-bottom:10px; padding:7px 10px; border-radius:8px; border:1px solid var(--border);">
+      <table class="data-table" id="tablaOriginalPartidas">
+        <thead><tr><th>Frente / Partida</th><th>Inicio</th><th>Fin</th><th>Unidad</th><th>Metrado total</th><th>P.U. (S/)</th><th>Presupuesto (S/)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>`;
+  }
 
   if (REVISION_EDITANDO) {
     html += `<div class="card">
@@ -846,6 +859,7 @@ async function renderLineasBaseTab(proyectoId) {
   document.getElementById("selectRevision").addEventListener("change", async (e) => {
     const id = e.target.value;
     REVISION_EDITANDO = id ? REVISIONES.find(r => r.id === id) : null;
+    VIENDO_ORIGINAL = !id;
     await renderLineasBaseTab(proyectoId);
   });
 
