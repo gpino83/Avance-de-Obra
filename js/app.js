@@ -7,6 +7,13 @@ let CURRENT_PROFILE = null; // { rol, nombre_completo }
 let PROYECTOS = [];
 let PARTIDAS = [];          // partidas del proyecto seleccionado
 let AVANCES = [];           // avances del proyecto seleccionado (todas las partidas)
+let ASIGNACIONES = [];      // asignaciones_frente del proyecto seleccionado (todos los usuarios)
+let MIS_FRENTES = [];       // frentes asignados al usuario logueado (solo aplica a rol "residente")
+let REVISIONES = [];        // revisiones_linea_base del proyecto (LB01, LB02, ...)
+let REVISION_ACTIVA = null; // la revision marcada activa=true, o null si se usa la original (LB00)
+let REVISION_EDITANDO = null; // revision que se esta editando en la pestaña "Líneas Base" (no necesariamente la activa)
+let OVERRIDES_ACTIVA = {};  // partida_id -> fila de partidas_revision de la revision ACTIVA
+let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la revision que se esta EDITANDO
 
 // ---------------------------------------------------------
 // Autenticación / arranque
@@ -25,6 +32,15 @@ let AVANCES = [];           // avances del proyecto seleccionado (todas las part
 
   document.getElementById("userName").textContent = CURRENT_PROFILE.nombre_completo || CURRENT_USER.email;
   document.getElementById("userRole").textContent = "(" + CURRENT_PROFILE.rol + ")";
+
+  if (CURRENT_PROFILE.rol === "admin") {
+    const tabBtn = document.getElementById("tabUsuariosBtn");
+    if (tabBtn) tabBtn.style.display = "";
+  }
+  if (CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner") {
+    const tabBtn2 = document.getElementById("tabLineasBaseBtn");
+    if (tabBtn2) tabBtn2.style.display = "";
+  }
 
   document.getElementById("logoutBtn").addEventListener("click", async () => {
     await supabaseClient.auth.signOut();
@@ -82,10 +98,15 @@ async function onProyectoChange() {
    document.getElementById("proyectoSelectPartidas")].forEach(sel => sel.value = proyectoId);
 
   await loadPartidasYAvances(proyectoId);
+  await loadAsignaciones(proyectoId);
+  await loadRevisiones(proyectoId);
+  aplicarOverridesActivos();
   renderPartidasTable();
   renderPartidaSelectAvance();
   await renderUltimosAvances();
   renderDashboard();
+  if (CURRENT_PROFILE.rol === "admin") await renderUsuariosTab(proyectoId);
+  if (CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner") await renderLineasBaseTab(proyectoId);
 }
 
 async function loadPartidasYAvances(proyectoId) {
@@ -99,6 +120,59 @@ async function loadPartidasYAvances(proyectoId) {
   const { data: avances } = await supabaseClient
     .from("avances_semanales").select("*").in("partida_id", partidaIds).order("semana_fin");
   AVANCES = avances || [];
+}
+
+// ---------------------------------------------------------
+// Asignaciones de frente (jefe de frente -> que frentes puede registrar)
+// ---------------------------------------------------------
+async function loadAsignaciones(proyectoId) {
+  const { data, error } = await supabaseClient
+    .from("asignaciones_frente").select("*").eq("proyecto_id", proyectoId);
+  if (error) { console.error(error); ASIGNACIONES = []; MIS_FRENTES = []; return; }
+  ASIGNACIONES = data || [];
+  MIS_FRENTES = ASIGNACIONES.filter(a => a.perfil_id === CURRENT_USER.id).map(a => a.frente);
+}
+
+// ---------------------------------------------------------
+// Líneas base adicionales (revisiones por cambios del cliente)
+// ---------------------------------------------------------
+async function loadRevisiones(proyectoId) {
+  const { data, error } = await supabaseClient
+    .from("revisiones_linea_base").select("*").eq("proyecto_id", proyectoId).order("fecha_creacion");
+  if (error) { console.error(error); REVISIONES = []; REVISION_ACTIVA = null; OVERRIDES_ACTIVA = {}; return; }
+  REVISIONES = data || [];
+  REVISION_ACTIVA = REVISIONES.find(r => r.activa) || null;
+  OVERRIDES_ACTIVA = {};
+  if (REVISION_ACTIVA) {
+    const { data: overrides } = await supabaseClient
+      .from("partidas_revision").select("*").eq("revision_id", REVISION_ACTIVA.id);
+    (overrides || []).forEach(o => { OVERRIDES_ACTIVA[o.partida_id] = o; });
+  }
+}
+
+// Aplica los valores de la revision ACTIVA sobre PARTIDAS (sobrescribe fecha_inicio_base,
+// fecha_fin_base, metrado_total, precio_unitario, presupuesto_total), guardando los valores
+// ORIGINALES (linea base contractual / LB00) en campos orig_* para poder dibujar ambas curvas.
+// Si no hay revision activa, PARTIDAS queda igual que antes (orig_* = valor actual).
+function aplicarOverridesActivos() {
+  PARTIDAS.forEach(p => {
+    p.orig_fecha_inicio_base = p.fecha_inicio_base;
+    p.orig_fecha_fin_base = p.fecha_fin_base;
+    p.orig_metrado_total = p.metrado_total;
+    p.orig_precio_unitario = p.precio_unitario;
+    p.orig_presupuesto_total = p.presupuesto_total;
+
+    const o = OVERRIDES_ACTIVA[p.id];
+    if (o) {
+      if (o.fecha_inicio_base) p.fecha_inicio_base = o.fecha_inicio_base;
+      if (o.fecha_fin_base) p.fecha_fin_base = o.fecha_fin_base;
+      if (o.metrado_total !== null && o.metrado_total !== undefined) p.metrado_total = o.metrado_total;
+      if (o.precio_unitario !== null && o.precio_unitario !== undefined) p.precio_unitario = o.precio_unitario;
+      p.presupuesto_total = (o.presupuesto_total !== null && o.presupuesto_total !== undefined)
+        ? o.presupuesto_total
+        : Number(p.metrado_total || 0) * Number(p.precio_unitario || 0);
+    }
+  });
 }
 
 // ---------------------------------------------------------
@@ -177,9 +251,19 @@ function renderPartidaSelectAvance() {
   const sel = document.getElementById("partidaSelect");
   const filtro = (document.getElementById("buscarPartidaAvance").value || "").trim().toLowerCase();
 
-  let lista = PARTIDAS;
+  // Un "residente" solo puede registrar avance en los frentes que tiene asignados.
+  // admin/planner ven todo, sin restricción.
+  const soloMisFrentes = CURRENT_PROFILE.rol === "residente";
+  if (soloMisFrentes && MIS_FRENTES.length === 0) {
+    sel.innerHTML = `<option disabled>No tienes frentes asignados — pídele al administrador que te asigne uno en "Usuarios / Asignaciones"</option>`;
+    document.getElementById("unidadHint").textContent = "";
+    document.getElementById("buscarPartidaAvance").oninput = renderPartidaSelectAvance;
+    return;
+  }
+
+  let lista = soloMisFrentes ? PARTIDAS.filter(p => MIS_FRENTES.includes(p.frente)) : PARTIDAS;
   if (filtro.length >= 2) {
-    lista = PARTIDAS.filter(p => p.nombre.toLowerCase().includes(filtro) || p.frente.toLowerCase().includes(filtro));
+    lista = lista.filter(p => p.nombre.toLowerCase().includes(filtro) || p.frente.toLowerCase().includes(filtro));
   }
   const truncado = lista.length > MAX_OPCIONES_AVANCE;
   if (truncado) lista = lista.slice(0, MAX_OPCIONES_AVANCE);
@@ -294,8 +378,16 @@ let curvaFisicaChartInstance = null;
 const GANTT_EXPANDED = new Set(); // frentes expandidos en el Gantt
 
 // Peso ECONÓMICO: participación de la partida en el presupuesto total (para la curva de valorización S/)
+// Usa la linea base EFECTIVA (la activa, o la original si no hay revision activa).
 function pesoEconomico(p, totalPresupuesto) {
   if (totalPresupuesto > 0) return (p.presupuesto_total || 0) / totalPresupuesto;
+  return 0;
+}
+
+// Igual que pesoEconomico pero siempre contra la línea base ORIGINAL (contractual / LB00),
+// para poder dibujar la curva de comparación cuando hay una revisión activa.
+function pesoEconomicoOriginal(p, totalPresupuestoOriginal) {
+  if (totalPresupuestoOriginal > 0) return (p.orig_presupuesto_total || 0) / totalPresupuestoOriginal;
   return 0;
 }
 
@@ -308,10 +400,12 @@ function avanceRealAcumuladoEnFecha(partidaId, fecha) {
   return Math.min(ejecutado / partida.metrado_total, 1);
 }
 
-function avancePlanificadoEnFecha(partida, fecha) {
+// useOriginal=true calcula contra la línea base ORIGINAL (contractual / LB00) en vez de
+// la efectiva (activa). Por defecto usa la efectiva, igual que antes.
+function avancePlanificadoEnFecha(partida, fecha, useOriginal) {
   const d = new Date(fecha);
-  const ini = new Date(partida.fecha_inicio_base);
-  const fin = new Date(partida.fecha_fin_base);
+  const ini = new Date(useOriginal ? (partida.orig_fecha_inicio_base || partida.fecha_inicio_base) : partida.fecha_inicio_base);
+  const fin = new Date(useOriginal ? (partida.orig_fecha_fin_base || partida.fecha_fin_base) : partida.fecha_fin_base);
   if (d <= ini) return 0;
   if (d >= fin) return 1;
   if (fin - ini <= 0) return 1;
@@ -320,8 +414,10 @@ function avancePlanificadoEnFecha(partida, fecha) {
 
 function generarSemanas() {
   if (PARTIDAS.length === 0) return [];
-  const inicios = PARTIDAS.map(p => new Date(p.fecha_inicio_base));
-  const fines = PARTIDAS.map(p => new Date(p.fecha_fin_base));
+  // Cubre tanto la linea base efectiva como la original, para que ambas curvas se
+  // dibujen completas cuando hay una revision activa con fechas distintas.
+  const inicios = PARTIDAS.flatMap(p => [new Date(p.fecha_inicio_base), new Date(p.orig_fecha_inicio_base || p.fecha_inicio_base)]);
+  const fines = PARTIDAS.flatMap(p => [new Date(p.fecha_fin_base), new Date(p.orig_fecha_fin_base || p.fecha_fin_base)]);
   const start = new Date(Math.min(...inicios));
   const today = new Date();
   const end = new Date(Math.max(...fines, today));
@@ -339,6 +435,7 @@ function calcularCurvas() {
   const totalPresupuesto = PARTIDAS.reduce((s,p) => s + (p.presupuesto_total || 0), 0);
   const partidasConMetrado = PARTIDAS.filter(p => p.metrado_total > 0);
   const semanas = generarSemanas();
+  const hayRevisionActiva = !!REVISION_ACTIVA;
 
   // --- Curva ECONÓMICA (S/): ponderada por presupuesto -> mide valorización real ---
   const economicoPlan = semanas.map(fecha =>
@@ -357,12 +454,53 @@ function calcularCurvas() {
     n === 0 ? 0 : partidasConMetrado.reduce((sum, p) => sum + avanceRealAcumuladoEnFecha(p.id, fecha), 0) / n * 100
   );
 
-  return { semanas, economicoPlan, economicoReal, fisicoPlan, fisicoReal, totalPresupuesto, nPartidasConMetrado: n };
+  // --- Curvas de comparación contra la línea base ORIGINAL (contractual / LB00),
+  //     solo se calculan cuando hay una revisión activa (si no, serían idénticas a las de arriba) ---
+  let economicoPlanOriginal = null, fisicoPlanOriginal = null, totalPresupuestoOriginal = 0;
+  if (hayRevisionActiva) {
+    totalPresupuestoOriginal = PARTIDAS.reduce((s,p) => s + (p.orig_presupuesto_total || 0), 0);
+    economicoPlanOriginal = semanas.map(fecha =>
+      PARTIDAS.reduce((sum, p) => sum + pesoEconomicoOriginal(p, totalPresupuestoOriginal) * avancePlanificadoEnFecha(p, fecha, true), 0) * 100
+    );
+    fisicoPlanOriginal = semanas.map(fecha =>
+      n === 0 ? 0 : partidasConMetrado.reduce((sum, p) => sum + avancePlanificadoEnFecha(p, fecha, true), 0) / n * 100
+    );
+  }
+
+  return {
+    semanas, economicoPlan, economicoReal, fisicoPlan, fisicoReal, totalPresupuesto, nPartidasConMetrado: n,
+    hayRevisionActiva, economicoPlanOriginal, fisicoPlanOriginal, totalPresupuestoOriginal,
+  };
 }
 
 function renderDashboard() {
-  const { semanas, economicoPlan, economicoReal, fisicoPlan, fisicoReal, totalPresupuesto } = calcularCurvas();
+  const {
+    semanas, economicoPlan, economicoReal, fisicoPlan, fisicoReal, totalPresupuesto,
+    hayRevisionActiva, economicoPlanOriginal, fisicoPlanOriginal, totalPresupuestoOriginal,
+  } = calcularCurvas();
   const hoy = new Date().toISOString().slice(0,10);
+
+  // Aviso de línea base activa (si hay una revisión por cambios del cliente en uso)
+  const avisoLB = document.getElementById("avisoLineaBaseActiva");
+  if (avisoLB) {
+    if (hayRevisionActiva) {
+      const deltaPresupuesto = totalPresupuesto - totalPresupuestoOriginal;
+      const finOriginal = PARTIDAS.reduce((max, p) => { const f = p.orig_fecha_fin_base; return (!max || (f && f > max)) ? f : max; }, null);
+      const finActivo = PARTIDAS.reduce((max, p) => { const f = p.fecha_fin_base; return (!max || (f && f > max)) ? f : max; }, null);
+      const deltaDias = (finOriginal && finActivo) ? Math.round((new Date(finActivo) - new Date(finOriginal)) / 86400000) : null;
+      avisoLB.style.display = "";
+      avisoLB.innerHTML = `
+        <b>Línea base activa: ${escapeHtml(REVISION_ACTIVA.nombre)}</b>${REVISION_ACTIVA.motivo ? " — " + escapeHtml(REVISION_ACTIVA.motivo) : ""}.
+        Frente a la línea base original (LB00): presupuesto
+        ${deltaPresupuesto >= 0 ? "+" : ""}S/ ${deltaPresupuesto.toLocaleString('es-PE', {maximumFractionDigits:0})}
+        ${deltaDias !== null ? `, fin de obra ${deltaDias >= 0 ? "+" : ""}${deltaDias} días` : ""}.
+        La línea gris punteada del gráfico es la original; la línea base activa usada para el desface es la revisada.
+      `;
+    } else {
+      avisoLB.style.display = "none";
+      avisoLB.innerHTML = "";
+    }
+  }
 
   // Importante: los stats de "hoy" se calculan EN LA FECHA DE HOY, no tomando el último
   // punto del gráfico (que llega hasta el fin de obra, no hasta la fecha actual).
@@ -418,30 +556,31 @@ function renderDashboard() {
 
   const econCtx = document.getElementById("curvaEconomicaChart").getContext("2d");
   if (curvaEconomicaChartInstance) curvaEconomicaChartInstance.destroy();
-  curvaEconomicaChartInstance = new Chart(econCtx, lineChartConfig(labels, economicoPlan, economicoReal, "#898781", "#2a78d6", "rgba(42,120,214,0.08)"));
+  curvaEconomicaChartInstance = new Chart(econCtx, lineChartConfig(labels, economicoPlan, economicoReal, "#898781", "#2a78d6", "rgba(42,120,214,0.08)", economicoPlanOriginal));
 
   const fisCtx = document.getElementById("curvaFisicaChart").getContext("2d");
   if (curvaFisicaChartInstance) curvaFisicaChartInstance.destroy();
-  curvaFisicaChartInstance = new Chart(fisCtx, lineChartConfig(labels, fisicoPlan, fisicoReal, "#898781", "#1baf7a", "rgba(27,175,122,0.08)"));
+  curvaFisicaChartInstance = new Chart(fisCtx, lineChartConfig(labels, fisicoPlan, fisicoReal, "#898781", "#1baf7a", "rgba(27,175,122,0.08)", fisicoPlanOriginal));
 
   renderTablaDesfacePorFrente(totalPresupuesto, hoy);
   renderGantt();
 }
 
-function lineChartConfig(labels, planData, realData, colorPlan, colorReal, fillReal) {
+function lineChartConfig(labels, planData, realData, colorPlan, colorReal, fillReal, planOriginalData) {
+  const datasets = [
+    { label: planOriginalData ? "Línea base activa (revisada)" : "Línea base (planificado)", data: planData, borderColor: colorPlan, backgroundColor: "transparent", borderDash: [5,3], tension: 0.15, pointRadius: 0 },
+    { label: "Avance real", data: realData, borderColor: colorReal, backgroundColor: fillReal, fill: true, tension: 0.15, pointRadius: 0 },
+  ];
+  if (planOriginalData) {
+    datasets.push({ label: "Línea base original (LB00)", data: planOriginalData, borderColor: "#b5b4ac", backgroundColor: "transparent", borderDash: [2,2], tension: 0.15, pointRadius: 0 });
+  }
   return {
     type: "line",
-    data: {
-      labels,
-      datasets: [
-        { label: "Línea base (planificado)", data: planData, borderColor: colorPlan, backgroundColor: "transparent", borderDash: [5,3], tension: 0.15, pointRadius: 0 },
-        { label: "Avance real", data: realData, borderColor: colorReal, backgroundColor: fillReal, fill: true, tension: 0.15, pointRadius: 0 },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: !!planOriginalData, position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
       scales: {
         y: { min: 0, max: 100, ticks: { callback: v => v + "%" } },
         x: { ticks: { maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 16 } },
@@ -593,6 +732,231 @@ function renderGantt() {
       if (GANTT_EXPANDED.has(frente)) GANTT_EXPANDED.delete(frente);
       else GANTT_EXPANDED.add(frente);
       renderGantt();
+    });
+  });
+}
+
+// ---------------------------------------------------------
+// Vista: USUARIOS / ASIGNACIONES (solo admin)
+// ---------------------------------------------------------
+async function renderUsuariosTab(proyectoId) {
+  const wrap = document.getElementById("asignacionesWrap");
+  if (!wrap) return;
+
+  const { data: perfiles, error } = await supabaseClient
+    .from("perfiles").select("id,nombre_completo,rol").order("nombre_completo");
+  if (error) { wrap.innerHTML = `<p style="color:var(--red);">No se pudo cargar usuarios: ${escapeHtml(error.message)}</p>`; return; }
+
+  const residentes = (perfiles || []).filter(p => p.rol === "residente");
+  const frentes = [...new Set(PARTIDAS.map(p => p.frente))].sort();
+
+  if (frentes.length === 0) {
+    wrap.innerHTML = `<p style="color:var(--text-muted);">Este proyecto todavía no tiene partidas cargadas.</p>`;
+    return;
+  }
+  if (residentes.length === 0) {
+    wrap.innerHTML = `<p style="color:var(--text-muted);">No hay usuarios con rol "residente" todavía. Deben registrarse primero desde la pantalla de login; luego les asignas frente aquí.</p>`;
+    return;
+  }
+
+  let html = `<table class="data-table"><thead><tr><th>Usuario</th>${frentes.map(f => `<th>${escapeHtml(f)}</th>`).join("")}</tr></thead><tbody>`;
+  residentes.forEach(u => {
+    html += `<tr><td>${escapeHtml(u.nombre_completo || u.id)}</td>`;
+    frentes.forEach(f => {
+      const asignado = ASIGNACIONES.some(a => a.perfil_id === u.id && a.frente === f);
+      html += `<td style="text-align:center;"><input type="checkbox" data-perfil="${escapeAttr(u.id)}" data-frente="${escapeAttr(f)}" ${asignado ? "checked" : ""}></td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll("input[type=checkbox]").forEach(chk => {
+    chk.addEventListener("change", async () => {
+      const perfilId = chk.dataset.perfil;
+      const frente = chk.dataset.frente;
+      chk.disabled = true;
+
+      if (chk.checked) {
+        const { error } = await supabaseClient.from("asignaciones_frente").insert({
+          perfil_id: perfilId, proyecto_id: proyectoId, frente,
+        });
+        if (error) { alert("No se pudo asignar: " + error.message); chk.checked = false; chk.disabled = false; return; }
+      } else {
+        const { error } = await supabaseClient.from("asignaciones_frente")
+          .delete().eq("perfil_id", perfilId).eq("proyecto_id", proyectoId).eq("frente", frente);
+        if (error) { alert("No se pudo quitar: " + error.message); chk.checked = true; chk.disabled = false; return; }
+      }
+
+      chk.disabled = false;
+      await loadAsignaciones(proyectoId);
+      if (perfilId === CURRENT_USER.id) renderPartidaSelectAvance();
+    });
+  });
+}
+
+// ---------------------------------------------------------
+// Vista: LÍNEAS BASE (revisiones adicionales por cambios del cliente) — admin/planner
+// ---------------------------------------------------------
+async function loadOverridesEditando() {
+  OVERRIDES_EDITANDO = {};
+  if (!REVISION_EDITANDO) return;
+  const { data } = await supabaseClient
+    .from("partidas_revision").select("*").eq("revision_id", REVISION_EDITANDO.id);
+  (data || []).forEach(o => { OVERRIDES_EDITANDO[o.partida_id] = o; });
+}
+
+async function renderLineasBaseTab(proyectoId) {
+  const wrap = document.getElementById("lineasBaseWrap");
+  if (!wrap) return;
+
+  if (REVISION_EDITANDO && !REVISIONES.find(r => r.id === REVISION_EDITANDO.id)) REVISION_EDITANDO = null;
+  if (!REVISION_EDITANDO && REVISIONES.length > 0) REVISION_EDITANDO = REVISION_ACTIVA || REVISIONES[REVISIONES.length - 1];
+  await loadOverridesEditando();
+
+  let html = `<div class="card" style="margin-bottom:12px;">
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+      <select id="selectRevision" style="padding:7px 10px; border-radius:8px; border:1px solid var(--border);">
+        <option value="">— Línea base original (LB00, contractual) —</option>
+        ${REVISIONES.map(r => `<option value="${r.id}" ${REVISION_EDITANDO && REVISION_EDITANDO.id === r.id ? "selected" : ""}>${escapeHtml(r.nombre)}${r.activa ? " (ACTIVA)" : ""}</option>`).join("")}
+      </select>
+      <button class="small-btn primary" id="btnNuevaRevision">+ Nueva línea base</button>
+      ${REVISION_EDITANDO ? `<button class="small-btn" id="btnActivarRevision" ${REVISION_EDITANDO.activa ? "disabled" : ""}>${REVISION_EDITANDO.activa ? "Es la activa" : "Activar esta línea base"}</button>` : ""}
+      ${REVISION_EDITANDO && REVISION_EDITANDO.activa ? `<button class="small-btn" id="btnDesactivarRevision">Volver a LB00 original</button>` : ""}
+    </div>
+    <p class="save-hint">${REVISION_EDITANDO
+      ? escapeHtml(REVISION_EDITANDO.motivo || "Sin motivo registrado") + " — creada " + fmtDate(REVISION_EDITANDO.fecha_creacion)
+      : "Mostrando la línea base original (contractual). Selecciona o crea una revisión para editar fechas/metrados/P.U. sin tocar el original."}</p>
+  </div>`;
+
+  if (REVISION_EDITANDO) {
+    html += `<div class="card">
+      <h2>Editar partidas de "${escapeHtml(REVISION_EDITANDO.nombre)}"</h2>
+      <p class="save-hint">Edita solo las partidas que realmente cambiaron por este motivo — las que no toques siguen usando el valor original (LB00). Los cambios se guardan al salir del campo. Deja una fecha vacía para volver a usar la original en esa partida.</p>
+      <input type="text" id="buscarPartidaRevision" placeholder="Buscar partida o frente..." style="width:100%; margin-bottom:10px; padding:7px 10px; border-radius:8px; border:1px solid var(--border);">
+      <table class="data-table" id="tablaRevisionPartidas">
+        <thead><tr><th>Frente / Partida</th><th>Inicio base</th><th>Fin base</th><th>Metrado total</th><th>P.U. (S/)</th><th>Presupuesto (S/)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>`;
+  }
+
+  wrap.innerHTML = html;
+
+  document.getElementById("selectRevision").addEventListener("change", async (e) => {
+    const id = e.target.value;
+    REVISION_EDITANDO = id ? REVISIONES.find(r => r.id === id) : null;
+    await renderLineasBaseTab(proyectoId);
+  });
+
+  document.getElementById("btnNuevaRevision").addEventListener("click", async () => {
+    const nombre = prompt("Nombre de la nueva línea base (ej. 'LB01 - Cambios cliente oct 2026'):");
+    if (!nombre) return;
+    const motivo = prompt("Motivo del cambio (opcional):") || null;
+    const { data, error } = await supabaseClient.from("revisiones_linea_base").insert({
+      proyecto_id: proyectoId, nombre, motivo, creado_por: CURRENT_USER.id, activa: false,
+    }).select().single();
+    if (error) { alert("No se pudo crear: " + error.message); return; }
+    await loadRevisiones(proyectoId);
+    REVISION_EDITANDO = data;
+    await renderLineasBaseTab(proyectoId);
+  });
+
+  const btnActivar = document.getElementById("btnActivarRevision");
+  if (btnActivar) btnActivar.addEventListener("click", async () => {
+    if (!confirm(`¿Activar "${REVISION_EDITANDO.nombre}" como línea base? Reemplaza a la que usan hoy el dashboard, el Gantt y los desfaces, para todos los usuarios.`)) return;
+    await supabaseClient.from("revisiones_linea_base").update({ activa: false }).eq("proyecto_id", proyectoId);
+    const { error } = await supabaseClient.from("revisiones_linea_base").update({ activa: true }).eq("id", REVISION_EDITANDO.id);
+    if (error) { alert("No se pudo activar: " + error.message); return; }
+    await onProyectoChange();
+  });
+
+  const btnDesactivar = document.getElementById("btnDesactivarRevision");
+  if (btnDesactivar) btnDesactivar.addEventListener("click", async () => {
+    if (!confirm("¿Volver a usar la línea base original (LB00) en el dashboard?")) return;
+    await supabaseClient.from("revisiones_linea_base").update({ activa: false }).eq("proyecto_id", proyectoId);
+    await onProyectoChange();
+  });
+
+  if (REVISION_EDITANDO) {
+    renderTablaRevisionPartidas();
+    document.getElementById("buscarPartidaRevision").addEventListener("input", renderTablaRevisionPartidas);
+  }
+}
+
+const MAX_FILAS_REVISION = 300;
+
+function renderTablaRevisionPartidas() {
+  const tbody = document.querySelector("#tablaRevisionPartidas tbody");
+  if (!tbody) return;
+  const filtro = (document.getElementById("buscarPartidaRevision").value || "").trim().toLowerCase();
+  tbody.innerHTML = "";
+
+  let lista = PARTIDAS;
+  if (filtro.length >= 2) {
+    lista = lista.filter(p => p.nombre.toLowerCase().includes(filtro) || p.frente.toLowerCase().includes(filtro));
+  } else if (PARTIDAS.length > MAX_FILAS_REVISION) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted); padding:16px;">Hay ${PARTIDAS.length} partidas — escribe al menos 2 letras en el buscador.</td></tr>`;
+    return;
+  }
+  if (lista.length > MAX_FILAS_REVISION) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted); padding:16px;">${lista.length} resultados — afina más la búsqueda.</td></tr>`;
+    lista = lista.slice(0, MAX_FILAS_REVISION);
+  }
+
+  let lastFrente = null;
+  lista.forEach(p => {
+    const o = OVERRIDES_EDITANDO[p.id];
+    const tieneCambio = !!o;
+    if (p.frente !== lastFrente) {
+      lastFrente = p.frente;
+      const trGroup = document.createElement("tr");
+      trGroup.className = "frente-group-row";
+      trGroup.innerHTML = `<td colspan="6">${escapeHtml(p.frente)}</td>`;
+      tbody.appendChild(trGroup);
+    }
+    const fIni = (o && o.fecha_inicio_base) || p.orig_fecha_inicio_base;
+    const fFin = (o && o.fecha_fin_base) || p.orig_fecha_fin_base;
+    const metrado = (o && o.metrado_total !== null && o.metrado_total !== undefined) ? o.metrado_total : p.orig_metrado_total;
+    const pu = (o && o.precio_unitario !== null && o.precio_unitario !== undefined) ? o.precio_unitario : p.orig_precio_unitario;
+    const presu = (o && o.presupuesto_total !== null && o.presupuesto_total !== undefined) ? o.presupuesto_total : Number(metrado||0) * Number(pu||0);
+
+    const tr = document.createElement("tr");
+    if (tieneCambio) tr.style.background = "color-mix(in srgb, var(--yellow) 12%, transparent)";
+    tr.innerHTML = `
+      <td style="padding-left:20px;">${escapeHtml(p.nombre)}${tieneCambio ? ' <span class="badge warn" style="margin-left:6px;">modificado</span>' : ""}</td>
+      <td><input type="date" data-field="fecha_inicio_base" value="${fIni || ""}"></td>
+      <td><input type="date" data-field="fecha_fin_base" value="${fFin || ""}"></td>
+      <td><input type="number" step="0.0001" data-field="metrado_total" value="${metrado}"></td>
+      <td><input type="number" step="0.0001" data-field="precio_unitario" value="${pu}"></td>
+      <td class="presupuesto-cell" style="font-weight:600;">S/ ${Number(presu || 0).toLocaleString('es-PE', {maximumFractionDigits:2})}</td>
+    `;
+    tbody.appendChild(tr);
+
+    tr.querySelectorAll("input").forEach(input => {
+      input.addEventListener("change", async () => {
+        const current = OVERRIDES_EDITANDO[p.id] || {
+          revision_id: REVISION_EDITANDO.id, partida_id: p.id,
+          fecha_inicio_base: p.orig_fecha_inicio_base, fecha_fin_base: p.orig_fecha_fin_base,
+          metrado_total: p.orig_metrado_total, precio_unitario: p.orig_precio_unitario, presupuesto_total: p.orig_presupuesto_total,
+        };
+        const field = input.dataset.field;
+        current[field] = (field === "fecha_inicio_base" || field === "fecha_fin_base")
+          ? (input.value || null)
+          : parseFloat(input.value || "0");
+        if (field === "metrado_total" || field === "precio_unitario") {
+          current.presupuesto_total = Number(current.metrado_total || 0) * Number(current.precio_unitario || 0);
+          tr.querySelector(".presupuesto-cell").textContent = "S/ " + current.presupuesto_total.toLocaleString('es-PE', {maximumFractionDigits:2});
+        }
+        const { error } = await supabaseClient.from("partidas_revision").upsert(current, { onConflict: "revision_id,partida_id" });
+        if (error) { alert("No se pudo guardar: " + error.message); return; }
+        OVERRIDES_EDITANDO[p.id] = current;
+        if (REVISION_EDITANDO.activa) {
+          OVERRIDES_ACTIVA[p.id] = current;
+          aplicarOverridesActivos();
+          renderDashboard();
+        }
+      });
     });
   });
 }
