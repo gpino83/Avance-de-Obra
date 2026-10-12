@@ -110,17 +110,37 @@ async function onProyectoChange() {
   if (CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner") await renderLineasBaseTab(proyectoId);
 }
 
+// Supabase devuelve como maximo 1000 filas por consulta. Esta funcion pide paginas de 1000
+// hasta traer todo. buildQuery debe devolver una consulta NUEVA (con orden estable) cada vez.
+async function fetchAll(buildQuery) {
+  const pageSize = 1000;
+  let from = 0;
+  let all = [];
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) { console.error(error); break; }
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 async function loadPartidasYAvances(proyectoId) {
-  const { data: partidas } = await supabaseClient
-    .from("partidas").select("*").eq("proyecto_id", proyectoId).order("orden");
-  PARTIDAS = partidas || [];
+  PARTIDAS = await fetchAll(() =>
+    supabaseClient.from("partidas").select("*").eq("proyecto_id", proyectoId).order("orden").order("id"));
 
   const partidaIds = PARTIDAS.map(p => p.id);
   if (partidaIds.length === 0) { AVANCES = []; return; }
 
-  const { data: avances } = await supabaseClient
-    .from("avances_semanales").select("*").in("partida_id", partidaIds).order("semana_fin");
-  AVANCES = avances || [];
+  // En bloques de 100 ids para no exceder el largo maximo de la URL
+  AVANCES = [];
+  for (let i = 0; i < partidaIds.length; i += 100) {
+    const chunk = partidaIds.slice(i, i + 100);
+    const parte = await fetchAll(() =>
+      supabaseClient.from("avances_semanales").select("*").in("partida_id", chunk).order("semana_fin").order("id"));
+    AVANCES = AVANCES.concat(parte);
+  }
 }
 
 // ---------------------------------------------------------
@@ -145,9 +165,9 @@ async function loadRevisiones(proyectoId) {
   REVISION_ACTIVA = REVISIONES.find(r => r.activa) || null;
   OVERRIDES_ACTIVA = {};
   if (REVISION_ACTIVA) {
-    const { data: overrides } = await supabaseClient
-      .from("partidas_revision").select("*").eq("revision_id", REVISION_ACTIVA.id);
-    (overrides || []).forEach(o => { OVERRIDES_ACTIVA[o.partida_id] = o; });
+    const overrides = await fetchAll(() =>
+      supabaseClient.from("partidas_revision").select("*").eq("revision_id", REVISION_ACTIVA.id).order("id"));
+    overrides.forEach(o => { OVERRIDES_ACTIVA[o.partida_id] = o; });
   }
 }
 
@@ -802,9 +822,9 @@ async function renderUsuariosTab(proyectoId) {
 async function loadOverridesEditando() {
   OVERRIDES_EDITANDO = {};
   if (!REVISION_EDITANDO) return;
-  const { data } = await supabaseClient
-    .from("partidas_revision").select("*").eq("revision_id", REVISION_EDITANDO.id);
-  (data || []).forEach(o => { OVERRIDES_EDITANDO[o.partida_id] = o; });
+  const data = await fetchAll(() =>
+    supabaseClient.from("partidas_revision").select("*").eq("revision_id", REVISION_EDITANDO.id).order("id"));
+  data.forEach(o => { OVERRIDES_EDITANDO[o.partida_id] = o; });
 }
 
 async function renderLineasBaseTab(proyectoId) {
@@ -895,7 +915,48 @@ async function renderLineasBaseTab(proyectoId) {
   if (REVISION_EDITANDO) {
     renderTablaRevisionPartidas();
     document.getElementById("buscarPartidaRevision").addEventListener("input", renderTablaRevisionPartidas);
+  } else {
+    renderTablaOriginalPartidas();
+    document.getElementById("buscarPartidaOriginal").addEventListener("input", renderTablaOriginalPartidas);
   }
+}
+
+// Tabla de solo lectura con los valores ORIGINALES (LB00) de cada partida
+function renderTablaOriginalPartidas() {
+  const tbody = document.querySelector("#tablaOriginalPartidas tbody");
+  if (!tbody) return;
+  const filtro = (document.getElementById("buscarPartidaOriginal").value || "").trim().toLowerCase();
+  tbody.innerHTML = "";
+
+  let lista = PARTIDAS;
+  if (filtro.length >= 2) {
+    lista = lista.filter(p => p.nombre.toLowerCase().includes(filtro) || p.frente.toLowerCase().includes(filtro));
+  } else if (PARTIDAS.length > MAX_FILAS_REVISION) {
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted); padding:16px;">Hay ${PARTIDAS.length} partidas — escribe al menos 2 letras en el buscador.</td></tr>`;
+    return;
+  }
+  if (lista.length > MAX_FILAS_REVISION) {
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted); padding:16px;">${lista.length} resultados — afina más la búsqueda.</td></tr>`;
+    lista = lista.slice(0, MAX_FILAS_REVISION);
+  }
+
+  let lastFrente = null;
+  lista.forEach(p => {
+    if (p.frente !== lastFrente) {
+      lastFrente = p.frente;
+      tbody.insertAdjacentHTML("beforeend", `<tr class="frente-group-row"><td colspan="7">${escapeHtml(p.frente)}</td></tr>`);
+    }
+    tbody.insertAdjacentHTML("beforeend", `
+      <tr>
+        <td style="padding-left:20px;">${escapeHtml(p.nombre)}</td>
+        <td>${fmtDate(p.orig_fecha_inicio_base)}</td>
+        <td>${fmtDate(p.orig_fecha_fin_base)}</td>
+        <td>${escapeHtml(p.unidad || "")}</td>
+        <td>${p.orig_metrado_total}</td>
+        <td>${p.orig_precio_unitario}</td>
+        <td style="font-weight:600;">S/ ${Number(p.orig_presupuesto_total || 0).toLocaleString('es-PE', {maximumFractionDigits:2})}</td>
+      </tr>`);
+  });
 }
 
 const MAX_FILAS_REVISION = 300;
