@@ -49,6 +49,7 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   });
 
   setupTabs();
+  initAsistente();
   await loadProyectos();
   setupAvanceForm();
   document.getElementById("buscarPartida").addEventListener("input", renderPartidasTable);
@@ -1156,3 +1157,90 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
+
+
+// ---------------------------------------------------------
+// Asistente IA (Edge Function "asistente" en Supabase). No envia montos en soles.
+// ---------------------------------------------------------
+let ASIST_HISTORIAL = [];
+
+function buildContextoObra() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const total = PARTIDAS.reduce((s, p) => s + (p.presupuesto_total || 0), 0);
+  const peso = p => total > 0 ? (p.presupuesto_total || 0) / total : 0;
+  const real = p => avanceRealAcumuladoEnFecha(p.id, hoy) * 100;
+  const plan = p => avancePlanificadoEnFecha(p, hoy) * 100;
+  const proy = PROYECTOS.find(p => p.id === document.getElementById("proyectoSelectDash").value);
+  const econReal = PARTIDAS.reduce((s, p) => s + peso(p) * real(p), 0);
+  const econPlan = PARTIDAS.reduce((s, p) => s + peso(p) * plan(p), 0);
+  const frentes = [...new Set(PARTIDAS.map(p => p.frente))].map(f => {
+    const ps = PARTIDAS.filter(p => p.frente === f);
+    const w = ps.reduce((s, p) => s + (p.presupuesto_total || 0), 0) || 1;
+    const r = ps.reduce((s, p) => s + (p.presupuesto_total || 0) * real(p), 0) / w;
+    const pl = ps.reduce((s, p) => s + (p.presupuesto_total || 0) * plan(p), 0) / w;
+    const ini = ps.reduce((m, p) => (!m || p.fecha_inicio_base < m) ? p.fecha_inicio_base : m, null);
+    const fin = ps.reduce((m, p) => (!m || p.fecha_fin_base > m) ? p.fecha_fin_base : m, null);
+    return { f, r, pl, d: r - pl, ini, fin, n: ps.length, pesoPct: total > 0 ? w / total * 100 : 0 };
+  }).sort((a, b) => a.d - b.d);
+  const criticas = PARTIDAS.filter(p => p.metrado_total > 0)
+    .map(p => ({ p, d: real(p) - plan(p) })).filter(x => x.d < -0.5)
+    .sort((a, b) => a.d - b.d).slice(0, 15);
+  const lines = [];
+  lines.push(`Proyecto: ${proy ? proy.nombre : ""}. Fecha de hoy: ${hoy}. Usuario con rol: ${CURRENT_PROFILE.rol}.`);
+  lines.push(`Linea base vigente: ${REVISION_ACTIVA ? REVISION_ACTIVA.nombre : "LB00 (contrato original)"}.`);
+  lines.push(`Avance economico real ${econReal.toFixed(1)}%, planificado a hoy ${econPlan.toFixed(1)}%, desface ${(econReal - econPlan).toFixed(1)} puntos.`);
+  lines.push(`Partidas: ${PARTIDAS.length}. Registros de avance: ${AVANCES.length}.`);
+  lines.push("Frentes (real% / planificado% / desface / peso en presupuesto% / inicio-fin base):");
+  frentes.forEach(x => lines.push(`- ${x.f}: ${x.r.toFixed(1)} / ${x.pl.toFixed(1)} / ${x.d.toFixed(1)} / ${x.pesoPct.toFixed(1)}% / ${x.ini} a ${x.fin} (${x.n} partidas)`));
+  if (criticas.length) {
+    lines.push("Partidas con mayor atraso (real% / plan%):");
+    criticas.forEach(x => lines.push(`- ${x.p.frente} / ${x.p.nombre}: ${real(x.p).toFixed(0)} / ${plan(x.p).toFixed(0)}`));
+  } else lines.push("No hay partidas con atraso registrado a hoy.");
+  return lines.join("\n");
+}
+
+function asistAgregar(rol, texto, extra) {
+  const chat = document.getElementById("asistChat");
+  const bg = rol === "user" ? "#eef4fc" : "#f4f3ef";
+  chat.insertAdjacentHTML("beforeend",
+    `<div style="margin:8px 0; padding:8px 12px; border-radius:8px; background:${bg}; white-space:pre-wrap;"><b>${rol === "user" ? "Tú" : "Asistente"}</b>${extra ? ` <span style="color:var(--text-muted); font-size:11px;">(${escapeHtml(extra)})</span>` : ""}<br>${escapeHtml(texto)}</div>`);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function asistEnviar(pregunta) {
+  if (!pregunta.trim()) return;
+  const btn = document.getElementById("asistBtn");
+  asistAgregar("user", pregunta);
+  ASIST_HISTORIAL.push({ role: "user", content: pregunta });
+  btn.disabled = true; btn.textContent = "Pensando...";
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("asistente", {
+      body: { messages: ASIST_HISTORIAL, contexto: buildContextoObra() },
+    });
+    if (error) {
+      let msg = error.message;
+      try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch (_) {}
+      throw new Error(msg);
+    }
+    if (data && data.error) throw new Error(data.error);
+    ASIST_HISTORIAL.push({ role: "assistant", content: data.respuesta });
+    asistAgregar("assistant", data.respuesta, data.proveedor);
+  } catch (e) {
+    ASIST_HISTORIAL.pop();
+    asistAgregar("assistant", "No pude responder: " + e.message);
+  }
+  btn.disabled = false; btn.textContent = "Enviar";
+}
+
+function initAsistente() {
+  const form = document.getElementById("asistForm");
+  if (!form) return;
+  form.addEventListener("submit", ev => {
+    ev.preventDefault();
+    const inp = document.getElementById("asistInput");
+    const q = inp.value; inp.value = "";
+    asistEnviar(q);
+  });
+  document.querySelectorAll("#view-asistente [data-q]").forEach(b =>
+    b.addEventListener("click", () => asistEnviar(b.dataset.q)));
+}
