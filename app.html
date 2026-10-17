@@ -21,6 +21,7 @@
 <nav class="tabs">
   <button class="tab-btn active" data-view="dashboard">Curva S / Dashboard</button>
   <button class="tab-btn" data-view="control">Control de Avance</button>
+  <button class="tab-btn" data-view="asistente">Asistente</button>
   <button class="tab-btn" data-view="gantt">Gantt de Avance</button>
   <button class="tab-btn" data-view="avance">Registrar Avance</button>
   <button class="tab-btn" data-view="partidas">Partidas (Línea Base)</button>
@@ -95,6 +96,24 @@
         <thead><tr><th>Frente</th><th>Presupuesto</th><th>Fin LB00</th><th>Fin vigente</th><th>Variación</th></tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ===================== ASISTENTE IA ===================== -->
+  <section class="view" id="view-asistente">
+    <div class="card">
+      <h2>Asistente de control de avance</h2>
+      <p class="save-hint">Responde con los datos de la obra de esta pantalla (avance, desface, partidas atrasadas y líneas base). No recibe montos en soles. Límite: 30 consultas por usuario cada 24 horas.</p>
+      <div id="asistChat" style="min-height:240px; max-height:480px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:12px; margin:10px 0; font-size:13.5px; line-height:1.5;"></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <button class="btn" type="button" data-q="¿Qué frentes están más atrasados y por qué conviene revisarlos primero?" style="padding:5px 10px; font-size:12px;">Frentes más atrasados</button>
+        <button class="btn" type="button" data-q="Redacta un resumen breve del avance de la semana para el informe." style="padding:5px 10px; font-size:12px;">Resumen semanal</button>
+        <button class="btn" type="button" data-q="¿Qué partidas tienen mayor desface y qué acciones sugieres?" style="padding:5px 10px; font-size:12px;">Partidas críticas</button>
+      </div>
+      <form id="asistForm" style="display:flex; gap:8px;">
+        <input type="text" id="asistInput" placeholder="Escribe tu pregunta sobre la obra..." style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid var(--border);" autocomplete="off">
+        <button type="submit" class="btn" id="asistBtn">Enviar</button>
+      </form>
     </div>
   </section>
 
