@@ -50,6 +50,7 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
 
   setupTabs();
   initAsistente();
+  initRestricciones();
   await loadProyectos();
   setupAvanceForm();
   document.getElementById("buscarPartida").addEventListener("input", renderPartidasTable);
@@ -107,6 +108,7 @@ async function onProyectoChange() {
   renderPartidaSelectAvance();
   await renderUltimosAvances();
   renderDashboard();
+  await loadRestricciones(proyectoId);
   if (CURRENT_PROFILE.rol === "admin") await renderUsuariosTab(proyectoId);
   if (CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner") await renderLineasBaseTab(proyectoId);
 }
@@ -1243,4 +1245,289 @@ function initAsistente() {
   });
   document.querySelectorAll("#view-asistente [data-q]").forEach(b =>
     b.addEventListener("click", () => asistEnviar(b.dataset.q)));
+}
+
+
+// ---------------------------------------------------------
+// Pestaña "Restricciones": matriz de restricciones online + estadisticas
+// ---------------------------------------------------------
+let RESTRICCIONES = [];
+let REST_EDIT_ID = null;
+let restChartLookahead = null, restChartCategoria = null, restChartEstado = null, restChartResp = null;
+
+const REST_CATEGORIAS = ["Ingeniería y diseño", "Información / RFI", "Materiales", "Mano de obra", "Equipos y maquinaria", "Subcontratos",
+  "Permisos y licencias", "Cliente / Operación del mall", "SSOMA", "Interferencias y coordinación", "Financiero / Contractual",
+  "Accesos y logística", "Clima y entorno"];
+const REST_ESTADOS = ["Identificada", "En gestión", "Levantada"];
+const REST_RESPONSABLES = ["Residente de obra", "Ingeniero de campo", "Planeamiento", "Logística / Compras", "Oficina técnica", "SSOMA",
+  "Calidad", "Gerencia de proyecto", "Cliente (Open Plaza)", "Proyectista", "Subcontratista"];
+const REST_SEMANAS = ["Vencida", "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Más de 6 sem"];
+
+function restPuedeEditar() { return ["admin", "planner", "residente"].includes(CURRENT_PROFILE.rol); }
+function restPuedeBorrar() { return ["admin", "planner"].includes(CURRENT_PROFILE.rol); }
+
+function restDias(r, hoy) {
+  if (!r.fecha_requerida || r.estado === "Levantada") return null;
+  return Math.round((new Date(r.fecha_requerida + "T00:00:00") - new Date(hoy + "T00:00:00")) / 86400000);
+}
+function restAlerta(r, hoy) {
+  if (r.estado === "Levantada") return "Cerrada";
+  const d = restDias(r, hoy);
+  if (d === null) return "";
+  if (d < 0) return "Vencida";
+  if (d <= 7) return "Urgente";
+  if (d <= 21) return "Próxima";
+  return "En plazo";
+}
+function restSemana(r, hoy) {
+  const d = restDias(r, hoy);
+  if (d === null) return null;
+  if (d < 0) return "Vencida";
+  const n = Math.floor(d / 7) + 1;
+  return n > 6 ? "Más de 6 sem" : "Sem " + n;
+}
+function restSeveridad(r) { return (r.probabilidad && r.impacto) ? r.probabilidad * r.impacto : null; }
+function restNivel(r) {
+  const s = restSeveridad(r);
+  if (s === null) return "";
+  return s >= 15 ? "Crítico" : s >= 10 ? "Alto" : s >= 5 ? "Medio" : "Bajo";
+}
+function restCodigo(r) { return "R-" + String(r.numero).padStart(3, "0"); }
+function restBadge(texto, mapa) {
+  if (!texto) return "";
+  const c = mapa[texto] || ["#e5e7eb", "#111"];
+  return `<span style="background:${c[0]}; color:${c[1]}; padding:2px 8px; border-radius:10px; font-size:11.5px; white-space:nowrap;">${escapeHtml(texto)}</span>`;
+}
+const REST_COL_ALERTA = { "Vencida": ["#c00000", "#fff"], "Urgente": ["#f4b183", "#000"], "Próxima": ["#ffe699", "#000"], "En plazo": ["#c6e0b4", "#000"], "Cerrada": ["#d9d9d9", "#444"] };
+const REST_COL_NIVEL = { "Crítico": ["#c00000", "#fff"], "Alto": ["#f4b183", "#000"], "Medio": ["#ffe699", "#000"], "Bajo": ["#c6e0b4", "#000"] };
+
+async function loadRestricciones(proyectoId) {
+  RESTRICCIONES = await fetchAll(() => supabaseClient.from("restricciones").select("*").eq("proyecto_id", proyectoId).order("numero"));
+  renderRestricciones();
+}
+
+function restOpcionesFrente() {
+  return ["General / Todo el proyecto", ...[...new Set(PARTIDAS.map(p => p.frente))].sort()];
+}
+
+function renderRestricciones() {
+  const cont = document.getElementById("restKpis");
+  if (!cont) return;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const abiertas = RESTRICCIONES.filter(r => r.estado !== "Levantada");
+  const levantadas = RESTRICCIONES.length - abiertas.length;
+  const vencidas = abiertas.filter(r => restAlerta(r, hoy) === "Vencida").length;
+  const urgentes = abiertas.filter(r => restAlerta(r, hoy) === "Urgente").length;
+  const criticas = abiertas.filter(r => ["Crítico", "Alto"].includes(restNivel(r))).length;
+  const sumPlazo = abiertas.reduce((s, r) => s + (Number(r.impacto_plazo_dias) || 0), 0);
+  const indice = RESTRICCIONES.length ? (levantadas / RESTRICCIONES.length * 100) : 0;
+  const tile = (l, v, cls) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${cls || ""}">${v}</div></div>`;
+  cont.innerHTML =
+    tile("Registradas", RESTRICCIONES.length) +
+    tile("Abiertas", abiertas.length) +
+    tile("Vencidas", vencidas, vencidas > 0 ? "bad" : "good") +
+    tile("Urgentes (≤ 7 días)", urgentes, urgentes > 0 ? "bad" : "") +
+    tile("Críticas o altas abiertas", criticas, criticas > 0 ? "bad" : "") +
+    tile("Índice de levantamiento", indice.toFixed(0) + "%") +
+    tile("Impacto en plazo abiertas (suma ref.)", sumPlazo + " d");
+
+  // Lookahead apilado por nivel de riesgo
+  const niveles = ["Crítico", "Alto", "Medio", "Bajo", "Sin evaluar"];
+  const colNivel = { "Crítico": "#c00000", "Alto": "#f4b183", "Medio": "#ffe699", "Bajo": "#c6e0b4", "Sin evaluar": "#bdbdbd" };
+  const dsLook = niveles.map(n => ({
+    label: n, backgroundColor: colNivel[n],
+    data: REST_SEMANAS.map(s => abiertas.filter(r => restSemana(r, hoy) === s && (restNivel(r) || "Sin evaluar") === n).length),
+  }));
+  if (restChartLookahead) restChartLookahead.destroy();
+  restChartLookahead = new Chart(document.getElementById("restChartLookahead").getContext("2d"), {
+    type: "bar", data: { labels: REST_SEMANAS, datasets: dsLook },
+    options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+
+  // Por categoría: abiertas vs levantadas
+  const cats = [...new Set(RESTRICCIONES.map(r => r.categoria).filter(Boolean))];
+  if (restChartCategoria) restChartCategoria.destroy();
+  restChartCategoria = new Chart(document.getElementById("restChartCategoria").getContext("2d"), {
+    type: "bar",
+    data: { labels: cats, datasets: [
+      { label: "Abiertas", backgroundColor: "#2a78d6", data: cats.map(c => RESTRICCIONES.filter(r => r.categoria === c && r.estado !== "Levantada").length) },
+      { label: "Levantadas", backgroundColor: "#1baf7a", data: cats.map(c => RESTRICCIONES.filter(r => r.categoria === c && r.estado === "Levantada").length) },
+    ] },
+    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }, y: { stacked: true } } },
+  });
+
+  // Por estado
+  if (restChartEstado) restChartEstado.destroy();
+  restChartEstado = new Chart(document.getElementById("restChartEstado").getContext("2d"), {
+    type: "doughnut",
+    data: { labels: REST_ESTADOS, datasets: [{ data: REST_ESTADOS.map(e => RESTRICCIONES.filter(r => r.estado === e).length), backgroundColor: ["#e07b22", "#2a78d6", "#1baf7a"] }] },
+    options: { responsive: true, maintainAspectRatio: false },
+  });
+
+  // Por responsable: abiertas y vencidas
+  const resp = [...new Set(abiertas.map(r => r.responsable).filter(Boolean))];
+  if (restChartResp) restChartResp.destroy();
+  restChartResp = new Chart(document.getElementById("restChartResp").getContext("2d"), {
+    type: "bar",
+    data: { labels: resp, datasets: [
+      { label: "Abiertas", backgroundColor: "#2a78d6", data: resp.map(x => abiertas.filter(r => r.responsable === x).length) },
+      { label: "Vencidas", backgroundColor: "#c00000", data: resp.map(x => abiertas.filter(r => r.responsable === x && restAlerta(r, hoy) === "Vencida").length) },
+    ] },
+    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+
+  // Mapa de calor 5x5 (abiertas)
+  let heat = `<table class="data-table" style="width:auto; text-align:center;"><thead><tr><th>Prob. \\ Impacto</th>${[1, 2, 3, 4, 5].map(i => `<th>${i}</th>`).join("")}</tr></thead><tbody>`;
+  for (let p = 5; p >= 1; p--) {
+    heat += `<tr><th>${p}</th>`;
+    for (let i = 1; i <= 5; i++) {
+      const sev = p * i;
+      const bg = sev >= 15 ? "#c00000" : sev >= 10 ? "#f4b183" : sev >= 5 ? "#ffe699" : "#c6e0b4";
+      const n = abiertas.filter(r => r.probabilidad === p && r.impacto === i).length;
+      heat += `<td style="background:${bg}; color:${sev >= 15 ? "#fff" : "#000"}; font-weight:700; min-width:48px;">${n || ""}</td>`;
+    }
+    heat += "</tr>";
+  }
+  document.getElementById("restHeatmap").innerHTML = heat + "</tbody></table>";
+
+  // Filtros (se conservan los valores elegidos)
+  const fill = (id, items, todos) => {
+    const sel = document.getElementById(id); const v = sel.value;
+    sel.innerHTML = `<option value="">${todos}</option>` + items.map(x => `<option>${escapeHtml(x)}</option>`).join("");
+    sel.value = v;
+  };
+  fill("restFiltCat", REST_CATEGORIAS, "Todas las categorías");
+  fill("restFiltFrente", restOpcionesFrente(), "Todos los frentes");
+  restRenderTabla();
+}
+
+function restRenderTabla() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const fe = document.getElementById("restFiltEstado").value;
+  const fc = document.getElementById("restFiltCat").value;
+  const ff = document.getElementById("restFiltFrente").value;
+  const q = document.getElementById("restBuscar").value.trim().toLowerCase();
+  let lista = RESTRICCIONES.filter(r => {
+    if (fe === "abiertas" && r.estado === "Levantada") return false;
+    if (fe && fe !== "abiertas" && fe !== "todas" && r.estado !== fe) return false;
+    if (fc && r.categoria !== fc) return false;
+    if (ff && r.frente !== ff) return false;
+    if (q && !((r.descripcion || "") + " " + (r.actividad || "") + " " + (r.responsable || "") + " " + restCodigo(r)).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  lista.sort((a, b) => {
+    const la = a.estado === "Levantada" ? 1 : 0, lb = b.estado === "Levantada" ? 1 : 0;
+    if (la !== lb) return la - lb;
+    return (a.fecha_requerida || "9999").localeCompare(b.fecha_requerida || "9999");
+  });
+  const tb = document.querySelector("#restTabla tbody");
+  const puedeE = restPuedeEditar(), puedeB = restPuedeBorrar();
+  tb.innerHTML = lista.length ? lista.map(r => `
+    <tr>
+      <td><b>${restCodigo(r)}</b></td>
+      <td>${escapeHtml(r.frente || "")}</td>
+      <td>${escapeHtml(r.actividad || "")}</td>
+      <td style="min-width:260px;">${escapeHtml(r.descripcion || "")}</td>
+      <td>${escapeHtml(r.categoria || "")}</td>
+      <td>${escapeHtml(r.responsable || "")}</td>
+      <td>${r.fecha_requerida ? fmtDate(r.fecha_requerida) : ""}</td>
+      <td>${escapeHtml(r.estado || "")}</td>
+      <td>${restBadge(restAlerta(r, hoy), REST_COL_ALERTA)}</td>
+      <td>${restSemana(r, hoy) || ""}</td>
+      <td>${restBadge(restNivel(r), REST_COL_NIVEL)}</td>
+      <td style="white-space:nowrap;">
+        ${puedeE ? `<button class="btn" data-ract="edit" data-id="${r.id}" style="padding:3px 8px; font-size:11.5px;">Editar</button>` : ""}
+        ${puedeE && r.estado !== "Levantada" ? `<button class="btn" data-ract="levantar" data-id="${r.id}" style="padding:3px 8px; font-size:11.5px;">Levantar</button>` : ""}
+        ${puedeB ? `<button class="btn" data-ract="del" data-id="${r.id}" style="padding:3px 8px; font-size:11.5px; background:var(--red);">Borrar</button>` : ""}
+      </td>
+    </tr>`).join("") : `<tr><td colspan="12" style="color:var(--text-muted);">No hay restricciones con estos filtros.</td></tr>`;
+  tb.querySelectorAll("[data-ract]").forEach(b => b.addEventListener("click", () => restAccion(b.dataset.ract, b.dataset.id)));
+}
+
+function restAbrirForm(r) {
+  REST_EDIT_ID = r ? r.id : null;
+  const f = document.getElementById("restForm");
+  f.style.display = "";
+  document.getElementById("restFormTitulo").textContent = r ? "Editar " + restCodigo(r) : "Nueva restricción";
+  const set = (id, v) => { document.getElementById(id).value = v == null ? "" : v; };
+  const optList = (id, items, val) => { const s = document.getElementById(id); s.innerHTML = items.map(x => `<option>${escapeHtml(x)}</option>`).join(""); s.value = val || items[0]; };
+  optList("rfFrente", restOpcionesFrente(), r && r.frente);
+  optList("rfCategoria", REST_CATEGORIAS, r && r.categoria);
+  optList("rfEstado", REST_ESTADOS, r && r.estado);
+  document.getElementById("rfRespList").innerHTML = REST_RESPONSABLES.map(x => `<option value="${escapeAttr(x)}">`).join("");
+  set("rfActividad", r && r.actividad); set("rfDescripcion", r && r.descripcion); set("rfResponsable", r && r.responsable);
+  set("rfFIdent", r ? r.fecha_identificacion : new Date().toISOString().slice(0, 10));
+  set("rfFReq", r && r.fecha_requerida); set("rfFComp", r && r.fecha_compromiso); set("rfFLev", r && r.fecha_levantamiento);
+  set("rfProb", r && r.probabilidad); set("rfImpacto", r && r.impacto);
+  set("rfPlazo", r && r.impacto_plazo_dias); set("rfCosto", r && r.impacto_costo);
+  set("rfAccion", r && r.accion); set("rfObs", r && r.observaciones);
+  document.getElementById("restMsg").textContent = "";
+  f.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function restGuardar(ev) {
+  ev.preventDefault();
+  const v = id => document.getElementById(id).value.trim();
+  const num = id => v(id) === "" ? null : Number(v(id));
+  const dat = id => v(id) === "" ? null : v(id);
+  const estado = v("rfEstado");
+  const fila = {
+    proyecto_id: document.getElementById("proyectoSelectDash").value,
+    frente: v("rfFrente"), actividad: v("rfActividad"), descripcion: v("rfDescripcion"),
+    categoria: v("rfCategoria"), responsable: v("rfResponsable"),
+    fecha_identificacion: dat("rfFIdent"), fecha_requerida: dat("rfFReq"), fecha_compromiso: dat("rfFComp"),
+    fecha_levantamiento: dat("rfFLev") || (estado === "Levantada" ? new Date().toISOString().slice(0, 10) : null),
+    estado, probabilidad: num("rfProb"), impacto: num("rfImpacto"),
+    impacto_plazo_dias: num("rfPlazo"), impacto_costo: num("rfCosto"),
+    accion: v("rfAccion"), observaciones: v("rfObs"),
+  };
+  const msg = document.getElementById("restMsg");
+  if (!fila.descripcion) { msg.textContent = "Escribe la descripción de la restricción."; return; }
+  let error;
+  if (REST_EDIT_ID) {
+    delete fila.proyecto_id;
+    ({ error } = await supabaseClient.from("restricciones").update(fila).eq("id", REST_EDIT_ID));
+  } else {
+    ({ error } = await supabaseClient.from("restricciones").insert(fila));
+  }
+  if (error) { msg.textContent = "No se pudo guardar: " + error.message; return; }
+  document.getElementById("restForm").style.display = "none";
+  await loadRestricciones(document.getElementById("proyectoSelectDash").value);
+}
+
+async function restAccion(accion, id) {
+  const r = RESTRICCIONES.find(x => x.id === id);
+  if (!r) return;
+  if (accion === "edit") return restAbrirForm(r);
+  let error;
+  if (accion === "levantar") {
+    ({ error } = await supabaseClient.from("restricciones").update({ estado: "Levantada", fecha_levantamiento: new Date().toISOString().slice(0, 10) }).eq("id", id));
+  } else if (accion === "del") {
+    if (!confirm("¿Borrar " + restCodigo(r) + "? Esta acción no se puede deshacer.")) return;
+    ({ error } = await supabaseClient.from("restricciones").delete().eq("id", id));
+  }
+  if (error) { alert("No se pudo completar: " + error.message); return; }
+  await loadRestricciones(document.getElementById("proyectoSelectDash").value);
+}
+
+function restExportarCSV() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const cab = ["ID", "Frente", "Actividad", "Restricción", "Categoría", "Responsable", "F. identificación", "F. requerida", "F. compromiso", "F. levantamiento", "Estado", "Días para requerida", "Alerta", "Semana lookahead", "Probabilidad", "Impacto", "Severidad", "Nivel", "Impacto plazo (días)", "Impacto costo (S/)", "Acción", "Observaciones"];
+  const esc = x => { const s = x == null ? "" : String(x); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const filas = RESTRICCIONES.map(r => [restCodigo(r), r.frente, r.actividad, r.descripcion, r.categoria, r.responsable, r.fecha_identificacion, r.fecha_requerida, r.fecha_compromiso, r.fecha_levantamiento, r.estado, restDias(r, hoy), restAlerta(r, hoy), restSemana(r, hoy), r.probabilidad, r.impacto, restSeveridad(r), restNivel(r), r.impacto_plazo_dias, r.impacto_costo, r.accion, r.observaciones].map(esc).join(";"));
+  const blob = new Blob(["﻿" + [cab.join(";"), ...filas].join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "matriz_restricciones_" + hoy + ".csv"; a.click();
+}
+
+function initRestricciones() {
+  const f = document.getElementById("restForm");
+  if (!f) return;
+  f.addEventListener("submit", restGuardar);
+  document.getElementById("restNueva").addEventListener("click", () => restAbrirForm(null));
+  document.getElementById("restCancelar").addEventListener("click", () => { f.style.display = "none"; });
+  document.getElementById("restCSV").addEventListener("click", restExportarCSV);
+  ["restFiltEstado", "restFiltCat", "restFiltFrente"].forEach(id => document.getElementById(id).addEventListener("change", restRenderTabla));
+  document.getElementById("restBuscar").addEventListener("input", restRenderTabla);
+  if (!restPuedeEditar()) document.getElementById("restNueva").style.display = "none";
 }
