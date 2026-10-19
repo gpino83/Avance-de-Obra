@@ -589,6 +589,7 @@ function renderDashboard() {
   renderTablaDesfacePorFrente(totalPresupuesto, hoy);
   renderGantt();
   renderControlAvance(totalPresupuesto, hoy);
+  renderKpis();
 }
 
 // ---------------------------------------------------------
@@ -1399,6 +1400,7 @@ function renderRestricciones() {
   fill("restFiltCat", REST_CATEGORIAS, "Todas las categorías");
   fill("restFiltFrente", restOpcionesFrente(), "Todos los frentes");
   restRenderTabla();
+  renderKpis();
 }
 
 function restRenderTabla() {
@@ -1530,4 +1532,134 @@ function initRestricciones() {
   ["restFiltEstado", "restFiltCat", "restFiltFrente"].forEach(id => document.getElementById(id).addEventListener("change", restRenderTabla));
   document.getElementById("restBuscar").addEventListener("input", restRenderTabla);
   if (!restPuedeEditar()) document.getElementById("restNueva").style.display = "none";
+}
+
+
+// ---------------------------------------------------------
+// Pestaña "KPIs": indicadores de control de obra calculados con los datos existentes
+// (no repite los de Dashboard / Control de Avance / Restricciones)
+// ---------------------------------------------------------
+let kpiChartPareto = null, kpiChartSemanal = null;
+
+function kpiFmtSoles(v) { return "S/ " + Math.round(v).toLocaleString("es-PE"); }
+function kpiDias(a, b) { return Math.round((new Date(a + "T00:00:00") - new Date(b + "T00:00:00")) / 86400000); }
+function kpiSumarDias(iso, n) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+function renderKpis() {
+  const cont = document.getElementById("kpiGrupoPlazo");
+  if (!cont || !PARTIDAS.length) return;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const total = PARTIDAS.reduce((s, p) => s + (p.presupuesto_total || 0), 0);
+  const conMetrado = PARTIDAS.filter(p => p.metrado_total > 0);
+  const real = p => avanceRealAcumuladoEnFecha(p.id, hoy) * 100;
+  const plan = p => avancePlanificadoEnFecha(p, hoy) * 100;
+  const econReal = total > 0 ? PARTIDAS.reduce((s, p) => s + (p.presupuesto_total || 0) * real(p), 0) / total : 0;
+  const econPlan = total > 0 ? PARTIDAS.reduce((s, p) => s + (p.presupuesto_total || 0) * plan(p), 0) / total : 0;
+  const fisReal = conMetrado.length ? conMetrado.reduce((s, p) => s + real(p), 0) / conMetrado.length : 0;
+  const fisPlan = conMetrado.length ? conMetrado.reduce((s, p) => s + plan(p), 0) / conMetrado.length : 0;
+  const inicio = PARTIDAS.reduce((m, p) => (!m || p.fecha_inicio_base < m) ? p.fecha_inicio_base : m, null);
+  const fin = PARTIDAS.reduce((m, p) => (!m || p.fecha_fin_base > m) ? p.fecha_fin_base : m, null);
+  const plazoTotal = kpiDias(fin, inicio);
+  const transcurrido = kpiDias(hoy, inicio);
+  const hayAvance = AVANCES.length > 0;
+
+  const tile = (l, v, hint, cls) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${cls || ""}">${v}</div>${hint ? `<div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${hint}</div>` : ""}</div>`;
+
+  // --- Plazo y ritmo ---
+  const spiE = econPlan > 0 ? econReal / econPlan : null;
+  const spiF = fisPlan > 0 ? fisReal / fisPlan : null;
+  const clsSpi = v => v === null ? "" : v >= 0.95 ? "good" : "bad";
+  let proy = "—", proyHint = "Disponible desde la 3.ª semana de obra con avance registrado", proyCls = "";
+  if (spiE && spiE > 0 && transcurrido >= 14 && hayAvance) {
+    const dur = plazoTotal / spiE;
+    const fechaProy = kpiSumarDias(inicio, Math.round(dur));
+    const dev = kpiDias(fechaProy, fin);
+    proy = fmtDate(fechaProy);
+    proyHint = `${dev >= 0 ? "+" : ""}${dev} días frente al fin base (${fmtDate(fin)}). Proyección simple: plazo ÷ SPI`;
+    proyCls = dev > 0 ? "bad" : "good";
+  }
+  const pendiente = total * (1 - econReal / 100);
+  const semRest = Math.max(kpiDias(fin, hoy < inicio ? inicio : hoy) / 7, 0);
+  const ritmoNec = semRest > 0 ? pendiente / semRest : null;
+  const desde28 = kpiSumarDias(hoy, -28);
+  const valor = a => { const p = PARTIDAS.find(x => x.id === a.partida_id); return p ? Number(a.metrado_ejecutado) * (p.precio_unitario || 0) : 0; };
+  const prod4 = AVANCES.filter(a => a.semana_fin > desde28 && a.semana_fin <= hoy).reduce((s, a) => s + valor(a), 0) / 4;
+  const relRitmo = (ritmoNec && hayAvance) ? prod4 / ritmoNec : null;
+  cont.innerHTML =
+    tile("SPI económico", spiE === null ? "—" : spiE.toFixed(2), "Avance real ÷ planificado a hoy (1.00 = según plan)", clsSpi(spiE)) +
+    tile("SPI físico", spiF === null ? "—" : spiF.toFixed(2), "Promedio de partidas, sin ponderar por costo", clsSpi(spiF)) +
+    tile("Fin de obra proyectado", proy, proyHint, proyCls) +
+    tile("Ritmo necesario", ritmoNec === null ? "—" : kpiFmtSoles(ritmoNec) + " / sem", `Lo pendiente (${kpiFmtSoles(pendiente)}) ÷ ${semRest.toFixed(0)} semanas hasta el fin base`) +
+    tile("Ritmo real (últimas 4 sem)", hayAvance ? kpiFmtSoles(prod4) + " / sem" : "Sin avance", "Valorización promedio semanal registrada") +
+    tile("Ritmo real ÷ necesario", relRitmo === null ? "—" : (relRitmo * 100).toFixed(0) + "%", "Menos de 100% = el ritmo actual no alcanza para terminar a tiempo", relRitmo === null ? "" : relRitmo >= 1 ? "good" : "bad");
+
+  // --- Atraso ---
+  const encurso = conMetrado.filter(p => plan(p) > 0);
+  const atrasadas = encurso.filter(p => real(p) - plan(p) < -5);
+  const sinIniciar = encurso.filter(p => real(p) === 0);
+  const deb = encurso.length;
+  document.getElementById("kpiGrupoAtraso").innerHTML =
+    tile("Partidas que ya debían haber iniciado", deb, `de ${conMetrado.length} partidas con metrado`) +
+    tile("Partidas atrasadas (desface < −5 pts)", atrasadas.length, deb ? (atrasadas.length / deb * 100).toFixed(0) + "% de las que ya debían estar en curso" : "Aún no hay partidas en curso", atrasadas.length ? "bad" : "good") +
+    tile("Debieron iniciar y no tienen avance", sinIniciar.length, deb ? (sinIniciar.length / deb * 100).toFixed(0) + "% de las que ya debían estar en curso" : "", sinIniciar.length ? "bad" : "good");
+
+  // Pareto del atraso (soles pendientes frente al plan)
+  const atr = PARTIDAS.map(p => ({ p, v: Math.max(0, plan(p) - real(p)) / 100 * (p.presupuesto_total || 0) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+  const totAtr = atr.reduce((s, x) => s + x.v, 0);
+  const top = atr.slice(0, 10);
+  let acum = 0;
+  const lineaAcum = top.map(x => { acum += x.v; return totAtr ? acum / totAtr * 100 : 0; });
+  document.getElementById("kpiParetoTotal").textContent = totAtr > 0
+    ? `Atraso total frente al plan: ${kpiFmtSoles(totAtr)}. Las 10 partidas mostradas explican el ${(lineaAcum[lineaAcum.length - 1] || 0).toFixed(0)}%.`
+    : "Sin atraso frente al plan a la fecha de hoy.";
+  if (kpiChartPareto) kpiChartPareto.destroy();
+  kpiChartPareto = new Chart(document.getElementById("kpiChartPareto").getContext("2d"), {
+    data: {
+      labels: top.map(x => (x.p.nombre || "").slice(0, 28)),
+      datasets: [
+        { type: "bar", label: "Atraso (S/)", data: top.map(x => Math.round(x.v)), backgroundColor: "#d03b3b", yAxisID: "y" },
+        { type: "line", label: "% acumulado", data: lineaAcum, borderColor: "#12233b", backgroundColor: "#12233b", yAxisID: "y1", tension: 0.15, pointRadius: 3 },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true }, y1: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { callback: v => v + "%" } } } },
+  });
+
+  // Producción semanal (ultimas 8 semanas) vs ritmo necesario
+  const etiquetas = [], reales = [];
+  for (let i = 8; i >= 1; i--) {
+    const hasta = kpiSumarDias(hoy, -7 * (i - 1)), desde = kpiSumarDias(hoy, -7 * i);
+    etiquetas.push("al " + fmtDate(hasta));
+    reales.push(Math.round(AVANCES.filter(a => a.semana_fin > desde && a.semana_fin <= hasta).reduce((s, a) => s + valor(a), 0)));
+  }
+  if (kpiChartSemanal) kpiChartSemanal.destroy();
+  kpiChartSemanal = new Chart(document.getElementById("kpiChartSemanal").getContext("2d"), {
+    data: {
+      labels: etiquetas,
+      datasets: [
+        { type: "bar", label: "Producción real (S/)", data: reales, backgroundColor: "#1baf7a" },
+        ...(ritmoNec ? [{ type: "line", label: "Ritmo necesario (S/ por semana)", data: etiquetas.map(() => Math.round(ritmoNec)), borderColor: "#e07b22", borderDash: [6, 4], pointRadius: 0 }] : []),
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } },
+  });
+
+  // --- Gestión de restricciones (solo indicadores nuevos) ---
+  const rs = (typeof RESTRICCIONES !== "undefined") ? RESTRICCIONES : [];
+  const lev = rs.filter(r => r.estado === "Levantada" && r.fecha_levantamiento && r.fecha_identificacion);
+  const abiertas = rs.filter(r => r.estado !== "Levantada");
+  const tProm = lev.length ? lev.reduce((s, r) => s + kpiDias(r.fecha_levantamiento, r.fecha_identificacion), 0) / lev.length : null;
+  const conFecha = abiertas.filter(r => r.fecha_identificacion);
+  const antig = conFecha.length ? conFecha.reduce((s, r) => s + kpiDias(hoy, r.fecha_identificacion), 0) / conFecha.length : null;
+  const compIncump = abiertas.filter(r => r.fecha_compromiso && r.fecha_compromiso < hoy).length;
+  const sinFecha = abiertas.filter(r => !r.fecha_requerida).length;
+  const sinEval = abiertas.filter(r => !r.probabilidad || !r.impacto).length;
+  const cumpl = rs.filter(r => r.estado === "Levantada" && r.fecha_requerida && r.fecha_levantamiento);
+  const aTiempo = cumpl.length ? cumpl.filter(r => r.fecha_levantamiento <= r.fecha_requerida).length / cumpl.length * 100 : null;
+  document.getElementById("kpiGrupoRest").innerHTML =
+    tile("Tiempo promedio de levantamiento", tProm === null ? "—" : tProm.toFixed(1) + " d", "Desde la identificación hasta el levantamiento") +
+    tile("Antigüedad promedio de abiertas", antig === null ? "—" : antig.toFixed(1) + " d", "Desde la identificación hasta hoy") +
+    tile("Levantadas dentro de la fecha requerida", aTiempo === null ? "—" : aTiempo.toFixed(0) + "%", "Cumplimiento del need-by", aTiempo === null ? "" : aTiempo >= 80 ? "good" : "bad") +
+    tile("Compromisos incumplidos", compIncump, "Abiertas con fecha compromiso ya vencida", compIncump ? "bad" : "good") +
+    tile("Abiertas sin fecha requerida", sinFecha, "No entran al lookahead", sinFecha ? "bad" : "good") +
+    tile("Abiertas sin evaluar riesgo", sinEval, "Falta probabilidad o impacto", sinEval ? "bad" : "good");
 }
