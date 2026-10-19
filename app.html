@@ -21,6 +21,7 @@
 <nav class="tabs">
   <button class="tab-btn active" data-view="dashboard">Curva S / Dashboard</button>
   <button class="tab-btn" data-view="control">Control de Avance</button>
+  <button class="tab-btn" data-view="kpis">KPIs</button>
   <button class="tab-btn" data-view="restricciones">Restricciones</button>
   <button class="tab-btn" data-view="asistente">Asistente</button>
   <button class="tab-btn" data-view="gantt">Gantt de Avance</button>
@@ -97,6 +98,35 @@
         <thead><tr><th>Frente</th><th>Presupuesto</th><th>Fin LB00</th><th>Fin vigente</th><th>Variación</th></tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ===================== KPIs ===================== -->
+  <section class="view" id="view-kpis">
+    <div class="card">
+      <h2>Plazo y ritmo</h2>
+      <p class="save-hint">SPI = avance real ÷ avance planificado a hoy. Los indicadores de ritmo comparan lo que se está produciendo con lo que falta para cumplir el fin de la línea base vigente.</p>
+      <div class="stat-row" id="kpiGrupoPlazo"></div>
+    </div>
+    <div class="card">
+      <h2>Producción semanal real vs. ritmo necesario</h2>
+      <p class="save-hint">Valorización semanal (metrado ejecutado × precio unitario) de las últimas 8 semanas.</p>
+      <div class="chart-wrap"><canvas id="kpiChartSemanal"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Alcance del atraso</h2>
+      <p class="save-hint">Partidas que según el plan ya deberían estar en curso (avance planificado mayor a 0 a la fecha de hoy).</p>
+      <div class="stat-row" id="kpiGrupoAtraso"></div>
+    </div>
+    <div class="card">
+      <h2>Pareto del atraso: dónde actuar primero</h2>
+      <p class="save-hint" id="kpiParetoTotal"></p>
+      <div class="chart-wrap" style="height:340px;"><canvas id="kpiChartPareto"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Gestión de restricciones</h2>
+      <p class="save-hint">Indicadores de disciplina de gestión, complementarios a los de la pestaña Restricciones.</p>
+      <div class="stat-row" id="kpiGrupoRest"></div>
     </div>
   </section>
 
