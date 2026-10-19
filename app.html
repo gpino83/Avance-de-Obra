@@ -21,6 +21,7 @@
 <nav class="tabs">
   <button class="tab-btn active" data-view="dashboard">Curva S / Dashboard</button>
   <button class="tab-btn" data-view="control">Control de Avance</button>
+  <button class="tab-btn" data-view="restricciones">Restricciones</button>
   <button class="tab-btn" data-view="asistente">Asistente</button>
   <button class="tab-btn" data-view="gantt">Gantt de Avance</button>
   <button class="tab-btn" data-view="avance">Registrar Avance</button>
@@ -96,6 +97,85 @@
         <thead><tr><th>Frente</th><th>Presupuesto</th><th>Fin LB00</th><th>Fin vigente</th><th>Variación</th></tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ===================== RESTRICCIONES (matriz online + estadisticas) ===================== -->
+  <section class="view" id="view-restricciones">
+    <div class="stat-row" id="restKpis"></div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px;">
+      <div class="card">
+        <h2>Lookahead: restricciones abiertas por semana</h2>
+        <p class="save-hint">Según la fecha requerida y apilado por nivel de riesgo (severidad = probabilidad × impacto).</p>
+        <div class="chart-wrap"><canvas id="restChartLookahead"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Por categoría</h2>
+        <div class="chart-wrap"><canvas id="restChartCategoria"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Por estado</h2>
+        <div class="chart-wrap"><canvas id="restChartEstado"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Abiertas y vencidas por responsable</h2>
+        <div class="chart-wrap"><canvas id="restChartResp"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Mapa de calor de riesgo (abiertas)</h2>
+      <p class="save-hint">Cantidad de restricciones abiertas por probabilidad (filas) e impacto (columnas).</p>
+      <div id="restHeatmap" style="overflow-x:auto;"></div>
+    </div>
+
+    <form class="card" id="restForm" style="display:none;">
+      <h2 id="restFormTitulo">Nueva restricción</h2>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0 14px;">
+        <div class="field"><label>Frente</label><select id="rfFrente"></select></div>
+        <div class="field"><label>Categoría</label><select id="rfCategoria"></select></div>
+        <div class="field" style="grid-column:1/-1;"><label>Actividad / partida afectada</label><input type="text" id="rfActividad"></div>
+        <div class="field" style="grid-column:1/-1;"><label>Restricción (descripción)</label><input type="text" id="rfDescripcion" required></div>
+        <div class="field"><label>Responsable de levantar</label><input type="text" id="rfResponsable" list="rfRespList"><datalist id="rfRespList"></datalist></div>
+        <div class="field"><label>Estado</label><select id="rfEstado"></select></div>
+        <div class="field"><label>Fecha de identificación</label><input type="date" id="rfFIdent"></div>
+        <div class="field"><label>Fecha requerida (need-by)</label><input type="date" id="rfFReq"></div>
+        <div class="field"><label>Fecha compromiso</label><input type="date" id="rfFComp"></div>
+        <div class="field"><label>Fecha de levantamiento</label><input type="date" id="rfFLev"></div>
+        <div class="field"><label>Probabilidad (1-5)</label><select id="rfProb"><option value=""></option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+        <div class="field"><label>Impacto (1-5)</label><select id="rfImpacto"><option value=""></option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+        <div class="field"><label>Impacto en plazo (días)</label><input type="number" step="1" id="rfPlazo"></div>
+        <div class="field"><label>Impacto en costo (S/)</label><input type="number" step="0.01" id="rfCosto"></div>
+        <div class="field" style="grid-column:1/-1;"><label>Acción de mitigación / plan de levantamiento</label><input type="text" id="rfAccion"></div>
+        <div class="field" style="grid-column:1/-1;"><label>Observaciones</label><input type="text" id="rfObs"></div>
+        <div class="field" style="grid-column:1/-1; display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="restCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="restMsg" style="color:var(--red); font-size:12.5px; margin-top:6px;"></div>
+    </form>
+
+    <div class="card">
+      <h2>Matriz de restricciones</h2>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 12px;">
+        <button class="btn" type="button" id="restNueva">+ Nueva restricción</button>
+        <select id="restFiltEstado" style="padding:7px 10px; border-radius:8px; border:1px solid var(--border);">
+          <option value="abiertas">Abiertas</option><option value="todas">Todas</option>
+          <option>Identificada</option><option>En gestión</option><option>Levantada</option>
+        </select>
+        <select id="restFiltCat" style="padding:7px 10px; border-radius:8px; border:1px solid var(--border);"></select>
+        <select id="restFiltFrente" style="padding:7px 10px; border-radius:8px; border:1px solid var(--border); max-width:260px;"></select>
+        <input type="text" id="restBuscar" placeholder="Buscar..." style="flex:1; min-width:160px; padding:7px 10px; border-radius:8px; border:1px solid var(--border);">
+        <button class="btn secondary" type="button" id="restCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table" id="restTabla">
+          <thead><tr><th>ID</th><th>Frente</th><th>Actividad</th><th>Restricción</th><th>Categoría</th><th>Responsable</th><th>F. requerida</th><th>Estado</th><th>Alerta</th><th>Semana</th><th>Riesgo</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
