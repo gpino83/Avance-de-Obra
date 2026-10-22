@@ -1842,20 +1842,24 @@ function fcCalcular(prodMes, meses, p, finObra, iniK, finK) {
   const ggMes = directoTotal * p.gg / 100 / nObra, utilMes = directoTotal * p.util / 100 / nObra;
   const venta = prodMes.map((v, i) => v + (enObra[i] ? ggMes + utilMes : 0));
   const totalVenta = venta.reduce((s, v) => s + v, 0);
-  const sumarEn = (arr, iso, monto) => { const k = iso.slice(0, 7); if (k in ix) arr[ix[k]] += monto; else if (k > meses[n - 1]) arr[n - 1] += monto; };
+  // el plazo (dias) se traduce a meses de desfase (dias / 30); si no es exacto, se reparte entre dos meses
+  const sumarLag = (arr, idx, dias, monto) => {
+    const lag = dias / 30, m0 = Math.floor(lag), fr = lag - m0;
+    const poner = (j, v) => { if (v) arr[Math.min(j, n - 1)] += v; };
+    poner(idx + m0, monto * (1 - fr)); poner(idx + m0 + 1, monto * fr);
+  };
   // adelanto: ingresa en el primer mes y se amortiza prorrata en cada valorizacion
   adel[0] = totalVenta * p.adelanto / 100;
   let retenido = 0;
   meses.forEach((k, i) => {
-    const corte = fcFinMes(k);
     val[i] = venta[i];
     const amort = venta[i] * p.adelanto / 100, ret = venta[i] * p.retencion / 100;
     retenido += ret;
-    sumarEn(cobros, kpiSumarDias(corte, p.cobro), venta[i] - amort - ret);
+    sumarLag(cobros, i, p.cobro, venta[i] - amort - ret);
     const costo = prodMes[i] * p.costo / 100 + (enObra[i] ? ggMes : 0);
-    sumarEn(egresos, kpiSumarDias(corte, p.pago), costo);
+    sumarLag(egresos, i, p.pago, costo);
   });
-  if (retenido > 0) sumarEn(cobros, kpiSumarDias(finObra, p.devolucion), retenido);
+  if (retenido > 0) sumarLag(cobros, Math.max(ix[finK] ?? n - 1, 0), p.devolucion, retenido);
   const neto = meses.map((_, i) => cobros[i] + adel[i] - egresos[i]);
   let a = 0; const acum = neto.map(v => a += v);
   return { val, cobros, adel, egresos, neto, acum, totalVenta };
@@ -1871,7 +1875,7 @@ function renderFlujoCaja() {
   const hoy = new Date().toISOString().slice(0, 10);
   const ini = PARTIDAS.reduce((m, x) => (!m || x.fecha_inicio_base < m) ? x.fecha_inicio_base : m, null);
   const fin = PARTIDAS.reduce((m, x) => (!m || x.fecha_fin_base > m) ? x.fecha_fin_base : m, null);
-  const ultimo = kpiSumarDias(fin, Math.max(p.cobro, p.pago, p.retencion > 0 ? p.devolucion : 0) + 35).slice(0, 7);
+  const ultimo = kpiSumarDias(fin, Math.max(p.cobro, p.pago, p.retencion > 0 ? p.devolucion : 0) + 62).slice(0, 7);
   const meses = fcMeses(ini.slice(0, 7), ultimo);
   const hoyK = hoy.slice(0, 7);
   const prodProg = meses.map(() => 0), prodReal = meses.map(() => 0);
@@ -1889,7 +1893,11 @@ function renderFlujoCaja() {
       }
     });
   });
-  const prog = fcCalcular(prodProg, meses, p, fin, ini.slice(0, 7), fin.slice(0, 7));
+  let prog = fcCalcular(prodProg, meses, p, fin, ini.slice(0, 7), fin.slice(0, 7));
+  // se corta el flujo en el ultimo mes con movimiento (cobros o pagos pendientes despues del fin de obra)
+  let ult = 0; meses.forEach((k, i) => { if (Math.abs(prog.cobros[i]) + Math.abs(prog.adel[i]) + Math.abs(prog.egresos[i]) + prodProg[i] > 1) ult = i; });
+  meses.length = ult + 1; prodProg.length = ult + 1; prodReal.length = ult + 1;
+  prog = fcCalcular(prodProg, meses, p, fin, ini.slice(0, 7), fin.slice(0, 7));
   const real = fcCalcular(prodReal, meses, p, fin, ini.slice(0, 7), fin.slice(0, 7));
   const hayReal = AVANCES.length > 0;
   // indicadores
@@ -1904,7 +1912,7 @@ function renderFlujoCaja() {
     tile("Mes en que se recupera", minV < 0 ? (iRec >= 0 ? fcEtiqueta(meses[iRec]) : "No se recupera") : "—", minV < 0 ? "Flujo acumulado vuelve a positivo" : "") +
     tile("Resultado final", kpiFmtSoles(maxFin), "Utilidad = ingresos − egresos al cierre", maxFin >= 0 ? "good" : "bad") +
     tile("Costo directo", kpiFmtSoles(directo), "Presupuesto cargado en la línea base");
-  aviso.textContent = "Flujo mensual sin IGV. El corte de cada valorización es el fin de mes. Gastos generales y utilidad se reparten en cuotas iguales en cada mes de obra. El costo directo usa el presupuesto de venta mientras no se cargue el presupuesto de costos. Los supuestos son editables y se guardan en este navegador.";
+  aviso.textContent = "Flujo mensual sin IGV. El corte de cada valorización es el fin de mes y el plazo de cobro o pago se traslada en meses (30 días = 1 mes). Gastos generales y utilidad se reparten en cuotas iguales en cada mes de obra. El costo directo usa el presupuesto de venta mientras no se cargue el presupuesto de costos. Los supuestos son editables y se guardan en este navegador.";
   // grafico
   const labels = meses.map(fcEtiqueta);
   if (fcChart) fcChart.destroy();
