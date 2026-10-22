@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Control de Avance de Obra — INARCO</title>
+<title>Control de Avance de Obra</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -24,6 +24,7 @@
   <button class="tab-btn" data-view="kpis">KPIs</button>
   <button class="tab-btn" data-view="restricciones">Restricciones</button>
   <button class="tab-btn" data-view="asistente">Asistente</button>
+  <button class="tab-btn" data-view="edt">EDT</button>
   <button class="tab-btn" data-view="gantt">Gantt de Avance</button>
   <button class="tab-btn" data-view="avance">Registrar Avance</button>
   <button class="tab-btn" data-view="partidas">Partidas (Línea Base)</button>
@@ -228,6 +229,27 @@
   </section>
 
   <!-- ===================== GANTT DE AVANCE ===================== -->
+  <section class="view" id="view-edt">
+    <div class="card">
+      <h2>EDT del proyecto</h2>
+      <p class="save-hint" id="edtAviso"></p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+        <input type="text" id="edtBuscar" placeholder="Buscar en la EDT..." style="flex:1; min-width:200px; padding:7px 10px; border-radius:8px; border:1px solid var(--border);">
+        <button class="btn secondary" id="edtN1" type="button">Nivel 1</button>
+        <button class="btn secondary" id="edtN2" type="button">Nivel 2</button>
+        <button class="btn secondary" id="edtN3" type="button">Nivel 3</button>
+        <button class="btn secondary" id="edtN4" type="button">Nivel 4</button>
+        <button class="btn secondary" id="edtTodo" type="button">Todo</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead><tr><th>Elemento</th><th style="text-align:right;">Presupuesto</th><th style="text-align:right;">Peso</th><th>Inicio</th><th>Fin</th><th style="text-align:right;">Planificado</th><th style="text-align:right;">Real</th><th style="text-align:right;">Desface (pts)</th></tr></thead>
+          <tbody id="edtTabla"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <section class="view" id="view-gantt">
     <div class="card">
       <h2>Gantt de Avance por Frente</h2>
