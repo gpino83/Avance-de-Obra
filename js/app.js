@@ -68,6 +68,10 @@ function setupTabs() {
       document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
       btn.classList.add("active");
       document.getElementById("view-" + btn.dataset.view).classList.add("active");
+      try {
+        if (btn.dataset.view === "edt") renderEdt();
+        if (btn.dataset.view === "flujo") renderFlujoCaja();
+      } catch (e) { console.error("Error al abrir la pestaña:", e); }
     });
   });
 }
@@ -590,10 +594,9 @@ function renderDashboard() {
 
   renderTablaDesfacePorFrente(totalPresupuesto, hoy);
   renderGantt();
-  renderControlAvance(totalPresupuesto, hoy);
-  renderKpis();
-  renderEdt();
-  renderFlujoCaja();
+  [() => renderControlAvance(totalPresupuesto, hoy), renderKpis, renderEdt, renderFlujoCaja].forEach(fn => {
+    try { fn(); } catch (e) { console.error("Error al dibujar una pestaña:", e); }
+  });
 }
 
 // ---------------------------------------------------------
@@ -1933,6 +1936,7 @@ function renderFlujoCaja() {
 }
 
 function initFlujoCaja() {
+  { const p0 = fcLeerParams(); FC_CAMPOS.forEach(([id, k]) => { const el = document.getElementById(id); if (el) el.value = p0[k]; }); }
   FC_CAMPOS.forEach(([id, k]) => {
     const el = document.getElementById(id);
     if (!el) return;
