@@ -52,6 +52,7 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   initAsistente();
   initRestricciones();
   initEdt();
+  initFlujoCaja();
   await loadProyectos();
   setupAvanceForm();
   document.getElementById("buscarPartida").addEventListener("input", renderPartidasTable);
@@ -592,6 +593,7 @@ function renderDashboard() {
   renderControlAvance(totalPresupuesto, hoy);
   renderKpis();
   renderEdt();
+  renderFlujoCaja();
 }
 
 // ---------------------------------------------------------
@@ -1782,4 +1784,164 @@ function initEdt() {
   });
   const t = document.getElementById("edtTodo");
   if (t) t.addEventListener("click", () => edtNiveles(99));
+}
+
+// ---------------------------------------------------------
+// Pestaña "Flujo de Caja": ingresos (valorizaciones cobradas) y egresos (costos pagados)
+// por mes, con supuestos editables. Valores sin IGV.
+// ---------------------------------------------------------
+let fcChart = null;
+const FC_DEFAULTS = { gg: 12.37, util: 6.0, costo: 100, adelanto: 20, retencion: 0, cobro: 30, pago: 30, devolucion: 90 };
+const FC_CAMPOS = [
+  ["fcGG", "gg", "Gastos generales de obra (% del directo, cuota fija mensual)"],
+  ["fcUtil", "util", "Utilidad (% del directo, cuota fija mensual)"],
+  ["fcCosto", "costo", "Costo directo (% del presupuesto)"],
+  ["fcAdelanto", "adelanto", "Adelanto directo (% del contrato)"],
+  ["fcRetencion", "retencion", "Retención / fondo de garantía (%)"],
+  ["fcCobro", "cobro", "Plazo de cobro al cliente (días desde el corte)"],
+  ["fcPago", "pago", "Plazo de pago de costos (días desde el corte)"],
+  ["fcDevolucion", "devolucion", "Devolución de retención (días tras el fin de obra)"],
+];
+
+function fcLeerParams() {
+  let g = {};
+  try { g = JSON.parse(localStorage.getItem("fc_params") || "{}"); } catch (e) { g = {}; }
+  const p = { ...FC_DEFAULTS };
+  FC_CAMPOS.forEach(([, k]) => { if (typeof g[k] === "number" && isFinite(g[k])) p[k] = g[k]; });
+  return p;
+}
+function fcGuardarParams(p) { try { localStorage.setItem("fc_params", JSON.stringify(p)); } catch (e) { /* sin almacenamiento */ } }
+
+function fcFinMes(clave) { // "2026-10" -> "2026-10-31"
+  const [a, m] = clave.split("-").map(Number);
+  const d = new Date(Date.UTC(a, m, 0));
+  return d.toISOString().slice(0, 10);
+}
+function fcMeses(desde, hasta) {
+  const out = []; let [a, m] = desde.split("-").map(Number);
+  const [ah, mh] = hasta.split("-").map(Number);
+  while (a < ah || (a === ah && m <= mh)) { out.push(a + "-" + String(m).padStart(2, "0")); m++; if (m > 12) { m = 1; a++; } }
+  return out;
+}
+const FC_MESES_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const fcEtiqueta = k => FC_MESES_ES[Number(k.slice(5)) - 1] + "-" + k.slice(2, 4);
+
+function fcCalcular(prodMes, meses, p, finObra, iniK, finK) {
+  // prodMes: produccion directa (S/) por mes. Gastos generales y utilidad: monto total repartido
+  // en cuotas iguales en cada mes de obra (valorizacion). Devuelve el flujo mensual.
+  const ix = {}; meses.forEach((k, i) => ix[k] = i);
+  const n = meses.length;
+  const z = () => new Array(n).fill(0);
+  const val = z(), cobros = z(), egresos = z(), adel = z();
+  const directoTotal = prodMes.reduce((s, v) => s + v, 0);
+  const enObra = meses.map(k => k >= iniK && k <= finK);
+  const nObra = Math.max(enObra.filter(Boolean).length, 1);
+  const ggMes = directoTotal * p.gg / 100 / nObra, utilMes = directoTotal * p.util / 100 / nObra;
+  const venta = prodMes.map((v, i) => v + (enObra[i] ? ggMes + utilMes : 0));
+  const totalVenta = venta.reduce((s, v) => s + v, 0);
+  const sumarEn = (arr, iso, monto) => { const k = iso.slice(0, 7); if (k in ix) arr[ix[k]] += monto; else if (k > meses[n - 1]) arr[n - 1] += monto; };
+  // adelanto: ingresa en el primer mes y se amortiza prorrata en cada valorizacion
+  adel[0] = totalVenta * p.adelanto / 100;
+  let retenido = 0;
+  meses.forEach((k, i) => {
+    const corte = fcFinMes(k);
+    val[i] = venta[i];
+    const amort = venta[i] * p.adelanto / 100, ret = venta[i] * p.retencion / 100;
+    retenido += ret;
+    sumarEn(cobros, kpiSumarDias(corte, p.cobro), venta[i] - amort - ret);
+    const costo = prodMes[i] * p.costo / 100 + (enObra[i] ? ggMes : 0);
+    sumarEn(egresos, kpiSumarDias(corte, p.pago), costo);
+  });
+  if (retenido > 0) sumarEn(cobros, kpiSumarDias(finObra, p.devolucion), retenido);
+  const neto = meses.map((_, i) => cobros[i] + adel[i] - egresos[i]);
+  let a = 0; const acum = neto.map(v => a += v);
+  return { val, cobros, adel, egresos, neto, acum, totalVenta };
+}
+
+function renderFlujoCaja() {
+  const cont = document.getElementById("fcTabla");
+  if (!cont) return;
+  const aviso = document.getElementById("fcAviso");
+  if (!PARTIDAS.length) { cont.innerHTML = ""; aviso.textContent = "Selecciona un proyecto con partidas."; return; }
+  const p = fcLeerParams();
+  FC_CAMPOS.forEach(([id, k]) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = p[k]; });
+  const hoy = new Date().toISOString().slice(0, 10);
+  const ini = PARTIDAS.reduce((m, x) => (!m || x.fecha_inicio_base < m) ? x.fecha_inicio_base : m, null);
+  const fin = PARTIDAS.reduce((m, x) => (!m || x.fecha_fin_base > m) ? x.fecha_fin_base : m, null);
+  const ultimo = kpiSumarDias(fin, Math.max(p.cobro, p.pago, p.retencion > 0 ? p.devolucion : 0) + 35).slice(0, 7);
+  const meses = fcMeses(ini.slice(0, 7), ultimo);
+  const hoyK = hoy.slice(0, 7);
+  const prodProg = meses.map(() => 0), prodReal = meses.map(() => 0);
+  PARTIDAS.forEach(x => {
+    const pres = x.presupuesto_total || 0; if (!pres) return;
+    let aP = 0, aR = 0;
+    meses.forEach((k, i) => {
+      const f = fcFinMes(k);
+      const cP = avancePlanificadoEnFecha(x, f);
+      prodProg[i] += (cP - aP) * pres; aP = cP;
+      if (k <= hoyK) {
+        const fr = f > hoy ? hoy : f;
+        const cR = avanceRealAcumuladoEnFecha(x.id, fr);
+        prodReal[i] += (cR - aR) * pres; aR = cR;
+      }
+    });
+  });
+  const prog = fcCalcular(prodProg, meses, p, fin, ini.slice(0, 7), fin.slice(0, 7));
+  const real = fcCalcular(prodReal, meses, p, fin, ini.slice(0, 7), fin.slice(0, 7));
+  const hayReal = AVANCES.length > 0;
+  // indicadores
+  const minV = Math.min(...prog.acum), iMin = prog.acum.indexOf(minV);
+  const maxFin = prog.acum[prog.acum.length - 1];
+  let iRec = -1; for (let i = iMin; i < prog.acum.length; i++) { if (prog.acum[i] >= 0) { iRec = i; break; } }
+  const tile = (l, v, h, c) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${c || ""}">${v}</div>${h ? `<div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${h}</div>` : ""}</div>`;
+  const directo = prodProg.reduce((s, v) => s + v, 0);
+  document.getElementById("fcTiles").innerHTML =
+    tile("Contrato valorizado", kpiFmtSoles(prog.totalVenta), "Directo + gastos generales + utilidad (sin IGV)") +
+    tile("Necesidad máxima de caja", minV < 0 ? kpiFmtSoles(-minV) : "Sin déficit", minV < 0 ? "En " + fcEtiqueta(meses[iMin]) + ": lo que hay que financiar" : "El flujo acumulado nunca es negativo", minV < 0 ? "bad" : "good") +
+    tile("Mes en que se recupera", minV < 0 ? (iRec >= 0 ? fcEtiqueta(meses[iRec]) : "No se recupera") : "—", minV < 0 ? "Flujo acumulado vuelve a positivo" : "") +
+    tile("Resultado final", kpiFmtSoles(maxFin), "Utilidad = ingresos − egresos al cierre", maxFin >= 0 ? "good" : "bad") +
+    tile("Costo directo", kpiFmtSoles(directo), "Presupuesto cargado en la línea base");
+  aviso.textContent = "Flujo mensual sin IGV. El corte de cada valorización es el fin de mes. Gastos generales y utilidad se reparten en cuotas iguales en cada mes de obra. El costo directo usa el presupuesto de venta mientras no se cargue el presupuesto de costos. Los supuestos son editables y se guardan en este navegador.";
+  // grafico
+  const labels = meses.map(fcEtiqueta);
+  if (fcChart) fcChart.destroy();
+  fcChart = new Chart(document.getElementById("fcChart").getContext("2d"), {
+    data: {
+      labels,
+      datasets: [
+        { type: "bar", label: "Flujo neto mensual (programado)", data: prog.neto.map(Math.round), backgroundColor: prog.neto.map(v => v >= 0 ? "#1baf7a" : "#d03b3b"), yAxisID: "y" },
+        { type: "line", label: "Acumulado programado", data: prog.acum.map(Math.round), borderColor: "#12233b", backgroundColor: "#12233b", tension: 0.15, pointRadius: 2, yAxisID: "y" },
+        ...(hayReal ? [{ type: "line", label: "Acumulado real", data: real.acum.map((v, i) => meses[i] <= hoyK ? Math.round(v) : null), borderColor: "#e07b22", backgroundColor: "#e07b22", pointRadius: 3, spanGaps: false, yAxisID: "y" }] : []),
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => (v / 1e6).toFixed(1) + " M" } } } },
+  });
+  // tabla
+  const f0 = v => Math.round(v).toLocaleString("es-PE");
+  const th = h => `<th style="text-align:right;">${h}</th>`;
+  let html = `<thead><tr><th>Mes</th>${th("Producción directa")}${th("Valorización")}${th("Cobros")}${th("Egresos")}${th("Flujo neto")}${th("Acumulado prog.")}${hayReal ? th("Acumulado real") : ""}</tr></thead><tbody>`;
+  meses.forEach((k, i) => {
+    const neg = prog.acum[i] < 0 ? "bad" : "";
+    html += `<tr><td>${fcEtiqueta(k)}</td><td style="text-align:right;">${f0(prodProg[i])}</td><td style="text-align:right;">${f0(prog.val[i])}</td>
+      <td style="text-align:right;">${f0(prog.cobros[i] + prog.adel[i])}</td><td style="text-align:right;">${f0(prog.egresos[i])}</td>
+      <td style="text-align:right;">${f0(prog.neto[i])}</td><td style="text-align:right;" class="${neg}">${f0(prog.acum[i])}</td>
+      ${hayReal ? `<td style="text-align:right;">${k <= hoyK ? f0(real.acum[i]) : "—"}</td>` : ""}</tr>`;
+  });
+  const sum = a => a.reduce((s, v) => s + v, 0);
+  html += `<tr style="font-weight:700;"><td>Total</td><td style="text-align:right;">${f0(directo)}</td><td style="text-align:right;">${f0(sum(prog.val))}</td><td style="text-align:right;">${f0(sum(prog.cobros) + sum(prog.adel))}</td><td style="text-align:right;">${f0(sum(prog.egresos))}</td><td style="text-align:right;">${f0(sum(prog.neto))}</td><td></td>${hayReal ? "<td></td>" : ""}</tr></tbody>`;
+  cont.innerHTML = html;
+}
+
+function initFlujoCaja() {
+  FC_CAMPOS.forEach(([id, k]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      const p = fcLeerParams(); const v = parseFloat(el.value);
+      p[k] = isFinite(v) && v >= 0 ? v : FC_DEFAULTS[k];
+      fcGuardarParams(p); renderFlujoCaja();
+    });
+  });
+  const r = document.getElementById("fcRestablecer");
+  if (r) r.addEventListener("click", () => { fcGuardarParams({ ...FC_DEFAULTS }); renderFlujoCaja(); });
 }
