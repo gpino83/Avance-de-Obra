@@ -1206,7 +1206,7 @@ function asistAgregar(rol, texto, extra) {
   const chat = document.getElementById("asistChat");
   const bg = rol === "user" ? "#eef4fc" : "#f4f3ef";
   chat.insertAdjacentHTML("beforeend",
-    `<div style="margin:8px 0; padding:8px 12px; border-radius:8px; background:${bg}; white-space:pre-wrap;"><b>${rol === "user" ? "Tú" : "Asistente"}</b>${extra ? ` <span style="color:var(--text-muted); font-size:11px;">(${escapeHtml(extra)})</span>` : ""}<br>${escapeHtml(texto)}</div>`);
+    `<div style="margin:8px 0; padding:8px 12px; border-radius:8px; background:${bg}; white-space:pre-wrap;"><b>${rol === "user" ? "Tú" : "Asistente"}</b>${extra ? ` <span style="color:var(--text-muted); font-size:11px;">(${escapeHtml(extra)})</span>` : ""}<br>${escapeHtml(String(texto).replace(/\*\*/g, ""))}</div>`);
   chat.scrollTop = chat.scrollHeight;
 }
 
@@ -1227,7 +1227,7 @@ async function asistEnviar(pregunta) {
     }
     if (data && data.error) throw new Error(data.error);
     ASIST_HISTORIAL.push({ role: "assistant", content: data.respuesta });
-    asistAgregar("assistant", data.respuesta, data.proveedor);
+    asistAgregar("assistant", data.respuesta);
   } catch (e) {
     ASIST_HISTORIAL.pop();
     asistAgregar("assistant", "No pude responder: " + e.message);
