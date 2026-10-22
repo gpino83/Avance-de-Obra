@@ -51,6 +51,7 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   setupTabs();
   initAsistente();
   initRestricciones();
+  initEdt();
   await loadProyectos();
   setupAvanceForm();
   document.getElementById("buscarPartida").addEventListener("input", renderPartidasTable);
@@ -590,6 +591,7 @@ function renderDashboard() {
   renderGantt();
   renderControlAvance(totalPresupuesto, hoy);
   renderKpis();
+  renderEdt();
 }
 
 // ---------------------------------------------------------
@@ -1662,4 +1664,120 @@ function renderKpis() {
     tile("Compromisos incumplidos", compIncump, "Abiertas con fecha compromiso ya vencida", compIncump ? "bad" : "good") +
     tile("Abiertas sin fecha requerida", sinFecha, "No entran al lookahead", sinFecha ? "bad" : "good") +
     tile("Abiertas sin evaluar riesgo", sinEval, "Falta probabilidad o impacto", sinEval ? "bad" : "good");
+}
+
+// ---------------------------------------------------------
+// Pestaña "EDT": estructura de desglose del trabajo (jerarquia del cronograma)
+// con presupuesto, peso, fechas, avance planificado/real y desface acumulados por nivel
+// ---------------------------------------------------------
+let EDT_ABIERTOS = new Set();
+let EDT_FILTRO = "";
+let EDT_INICIAL = true;
+
+function edtConstruir(hoy) {
+  const raiz = { key: "", hijos: new Map(), hojas: [], nivel: 0 };
+  PARTIDAS.forEach(p => {
+    const segs = (p.edt || "").split(" > ").map(s => s.trim()).filter(Boolean);
+    if (!segs.length) return;
+    const plan = avancePlanificadoEnFecha(p, hoy) * 100;
+    const real = avanceRealAcumuladoEnFecha(p.id, hoy) * 100;
+    const pres = p.presupuesto_total || 0;
+    let nodo = raiz;
+    const pila = [raiz];
+    segs.slice(0, -1).forEach((s, i) => {
+      if (!nodo.hijos.has(s)) nodo.hijos.set(s, { key: nodo.key + "\u0001" + s, nombre: s, nivel: i + 1, hijos: new Map(), hojas: [], pres: 0, plan: 0, real: 0, ini: null, fin: null, n: 0 });
+      nodo = nodo.hijos.get(s);
+      pila.push(nodo);
+    });
+    const hoja = { p, nombre: segs[segs.length - 1], pres, planPct: plan, realPct: real };
+    nodo.hojas.push(hoja);
+    pila.slice(1).forEach(n => {
+      n.pres += pres; n.plan += pres * plan; n.real += pres * real; n.n++;
+      if (p.fecha_inicio_base && (!n.ini || p.fecha_inicio_base < n.ini)) n.ini = p.fecha_inicio_base;
+      if (p.fecha_fin_base && (!n.fin || p.fecha_fin_base > n.fin)) n.fin = p.fecha_fin_base;
+    });
+  });
+  return raiz;
+}
+
+function edtCoincide(nodo, f) {
+  if (!f) return true;
+  if ((nodo.nombre || "").toLowerCase().includes(f)) return true;
+  if (nodo.hojas.some(h => h.nombre.toLowerCase().includes(f))) return true;
+  for (const h of nodo.hijos.values()) if (edtCoincide(h, f)) return true;
+  return false;
+}
+
+function renderEdt() {
+  const tb = document.getElementById("edtTabla");
+  if (!tb) return;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const total = PARTIDAS.reduce((s, p) => s + (p.presupuesto_total || 0), 0);
+  const conEdt = PARTIDAS.filter(p => p.edt).length;
+  const aviso = document.getElementById("edtAviso");
+  if (!PARTIDAS.length || !conEdt) {
+    tb.innerHTML = "";
+    aviso.textContent = PARTIDAS.length ? "Las partidas aún no tienen EDT cargada. Ejecuta el script agregar_edt.sql en Supabase." : "Selecciona un proyecto con partidas.";
+    return;
+  }
+  aviso.textContent = `${conEdt.toLocaleString("es-PE")} partidas organizadas en la EDT. Los porcentajes de cada nivel se calculan ponderando por presupuesto, a la fecha de hoy.`;
+  const raiz = edtConstruir(hoy);
+  if (EDT_INICIAL) { raiz.hijos.forEach(n => EDT_ABIERTOS.add(n.key)); EDT_INICIAL = false; }
+  const f = EDT_FILTRO.trim().toLowerCase();
+  const cls = d => d < -5 ? "bad" : d >= -0.5 ? "good" : "";
+  const filas = [];
+  const fila = (cuerpo, nivel, esHoja, key, abierto, pres, ini, fin, plan, real, n) => {
+    const d = real - plan;
+    const peso = total > 0 ? (pres / total * 100) : 0;
+    const toggle = esHoja ? `<span style="display:inline-block; width:16px;"></span>` : `<span style="display:inline-block; width:16px; cursor:pointer;">${abierto ? "▾" : "▸"}</span>`;
+    filas.push(`<tr ${esHoja ? "" : `data-edt="${escapeAttr(key)}" style="cursor:pointer; background:${nivel === 1 ? "#eef1f6" : nivel === 2 ? "#f6f7fa" : "transparent"}; font-weight:${nivel <= 2 ? 600 : 400};"`}>
+      <td style="padding-left:${8 + nivel * 16}px;">${toggle}${escapeHtml(cuerpo)}${!esHoja ? ` <span style="color:var(--text-muted); font-weight:400; font-size:11px;">(${n})</span>` : ""}</td>
+      <td style="text-align:right;">${kpiFmtSoles(pres)}</td>
+      <td style="text-align:right;">${peso.toFixed(2)}%</td>
+      <td>${ini ? fmtDate(ini) : "—"}</td><td>${fin ? fmtDate(fin) : "—"}</td>
+      <td style="text-align:right;">${plan.toFixed(1)}%</td>
+      <td style="text-align:right;">${real.toFixed(1)}%</td>
+      <td style="text-align:right;" class="${cls(d)}">${d >= 0 ? "+" : ""}${d.toFixed(1)}</td></tr>`);
+  };
+  const recorrer = nodo => {
+    const hijos = [...nodo.hijos.values()].sort((a, b) => (a.ini || "").localeCompare(b.ini || "") || a.nombre.localeCompare(b.nombre));
+    hijos.forEach(n => {
+      if (f && !edtCoincide(n, f)) return;
+      const abierto = f ? true : EDT_ABIERTOS.has(n.key);
+      fila(n.nombre, n.nivel, false, n.key, abierto, n.pres, n.ini, n.fin, n.pres ? n.plan / n.pres : 0, n.pres ? n.real / n.pres : 0, n.n);
+      if (abierto) {
+        recorrer(n);
+        n.hojas.slice().sort((a, b) => (a.p.fecha_inicio_base || "").localeCompare(b.p.fecha_inicio_base || "") || a.nombre.localeCompare(b.nombre))
+          .filter(h => !f || h.nombre.toLowerCase().includes(f) || n.nombre.toLowerCase().includes(f))
+          .forEach(h => fila(h.nombre, n.nivel + 1, true, "", false, h.pres, h.p.fecha_inicio_base, h.p.fecha_fin_base, h.planPct, h.realPct, 1));
+      }
+    });
+  };
+  recorrer(raiz);
+  tb.innerHTML = filas.join("") || `<tr><td colspan="8" style="color:var(--text-muted); padding:12px;">Sin resultados para la búsqueda.</td></tr>`;
+  tb.querySelectorAll("tr[data-edt]").forEach(tr => tr.addEventListener("click", () => {
+    const k = tr.dataset.edt;
+    if (EDT_ABIERTOS.has(k)) EDT_ABIERTOS.delete(k); else EDT_ABIERTOS.add(k);
+    renderEdt();
+  }));
+}
+
+function edtNiveles(hasta) {
+  EDT_ABIERTOS = new Set();
+  const hoy = new Date().toISOString().slice(0, 10);
+  const rec = n => { n.hijos.forEach(h => { if (h.nivel < hasta) EDT_ABIERTOS.add(h.key); rec(h); }); };
+  rec(edtConstruir(hoy));
+  EDT_INICIAL = false;
+  renderEdt();
+}
+
+function initEdt() {
+  const b = document.getElementById("edtBuscar");
+  if (b) b.addEventListener("input", () => { EDT_FILTRO = b.value; renderEdt(); });
+  [["edtN1", 1], ["edtN2", 2], ["edtN3", 3], ["edtN4", 4]].forEach(([id, n]) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("click", () => edtNiveles(n));
+  });
+  const t = document.getElementById("edtTodo");
+  if (t) t.addEventListener("click", () => edtNiveles(99));
 }
