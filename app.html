@@ -25,6 +25,7 @@
   <button class="tab-btn" data-view="restricciones">Restricciones</button>
   <button class="tab-btn" data-view="asistente">Asistente</button>
   <button class="tab-btn" data-view="edt">EDT</button>
+  <button class="tab-btn" data-view="flujo">Flujo de Caja</button>
   <button class="tab-btn" data-view="gantt">Gantt de Avance</button>
   <button class="tab-btn" data-view="avance">Registrar Avance</button>
   <button class="tab-btn" data-view="partidas">Partidas (Línea Base)</button>
@@ -247,6 +248,36 @@
           <tbody id="edtTabla"></tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-flujo">
+    <div class="card">
+      <h2>Supuestos del flujo de caja</h2>
+      <p class="save-hint" id="fcAviso"></p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin-bottom:10px;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Gastos generales de obra (% del directo, cuota fija mensual)<input type="number" id="fcGG" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Utilidad (% del directo, cuota fija mensual)<input type="number" id="fcUtil" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Costo directo (% del presupuesto)<input type="number" id="fcCosto" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Adelanto directo (% del contrato)<input type="number" id="fcAdelanto" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Retención / fondo de garantía (%)<input type="number" id="fcRetencion" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Plazo de cobro al cliente (días)<input type="number" id="fcCobro" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Plazo de pago de costos (días)<input type="number" id="fcPago" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:var(--text-muted); gap:3px;">Devolución de retención (días tras fin de obra)<input type="number" id="fcDevolucion" min="0" step="any" style="padding:6px 8px; border-radius:8px; border:1px solid var(--border);"></label>
+      </div>
+      <button class="btn secondary" id="fcRestablecer" type="button">Restablecer valores</button>
+    </div>
+    <div class="card">
+      <h2>Resumen</h2>
+      <div class="stat-row" id="fcTiles"></div>
+    </div>
+    <div class="card">
+      <h2>Flujo neto y acumulado por mes</h2>
+      <div class="chart-wrap" style="height:340px;"><canvas id="fcChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Detalle mensual (S/)</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="fcTabla"></table></div>
     </div>
   </section>
 
