@@ -1673,6 +1673,7 @@ function renderKpis() {
 let EDT_ABIERTOS = new Set();
 let EDT_FILTRO = "";
 let EDT_INICIAL = true;
+let EDT_KEYS = [];
 
 function edtConstruir(hoy) {
   const raiz = { key: "", hijos: new Map(), hojas: [], nivel: 0 };
@@ -1685,7 +1686,7 @@ function edtConstruir(hoy) {
     let nodo = raiz;
     const pila = [raiz];
     segs.slice(0, -1).forEach((s, i) => {
-      if (!nodo.hijos.has(s)) nodo.hijos.set(s, { key: nodo.key + "\u0001" + s, nombre: s, nivel: i + 1, hijos: new Map(), hojas: [], pres: 0, plan: 0, real: 0, ini: null, fin: null, n: 0 });
+      if (!nodo.hijos.has(s)) nodo.hijos.set(s, { key: nodo.key + "|" + s, nombre: s, nivel: i + 1, hijos: new Map(), hojas: [], pres: 0, plan: 0, real: 0, ini: null, fin: null, n: 0 });
       nodo = nodo.hijos.get(s);
       pila.push(nodo);
     });
@@ -1726,11 +1727,12 @@ function renderEdt() {
   const f = EDT_FILTRO.trim().toLowerCase();
   const cls = d => d < -5 ? "bad" : d >= -0.5 ? "good" : "";
   const filas = [];
+  EDT_KEYS = [];
   const fila = (cuerpo, nivel, esHoja, key, abierto, pres, ini, fin, plan, real, n) => {
     const d = real - plan;
     const peso = total > 0 ? (pres / total * 100) : 0;
     const toggle = esHoja ? `<span style="display:inline-block; width:16px;"></span>` : `<span style="display:inline-block; width:16px; cursor:pointer;">${abierto ? "▾" : "▸"}</span>`;
-    filas.push(`<tr ${esHoja ? "" : `data-edt="${escapeAttr(key)}" style="cursor:pointer; background:${nivel === 1 ? "#eef1f6" : nivel === 2 ? "#f6f7fa" : "transparent"}; font-weight:${nivel <= 2 ? 600 : 400};"`}>
+    filas.push(`<tr ${esHoja ? "" : `data-edt="${EDT_KEYS.push(key) - 1}" style="cursor:pointer; background:${nivel === 1 ? "#eef1f6" : nivel === 2 ? "#f6f7fa" : "transparent"}; font-weight:${nivel <= 2 ? 600 : 400};"`}>
       <td style="padding-left:${8 + nivel * 16}px;">${toggle}${escapeHtml(cuerpo)}${!esHoja ? ` <span style="color:var(--text-muted); font-weight:400; font-size:11px;">(${n})</span>` : ""}</td>
       <td style="text-align:right;">${kpiFmtSoles(pres)}</td>
       <td style="text-align:right;">${peso.toFixed(2)}%</td>
@@ -1756,7 +1758,7 @@ function renderEdt() {
   recorrer(raiz);
   tb.innerHTML = filas.join("") || `<tr><td colspan="8" style="color:var(--text-muted); padding:12px;">Sin resultados para la búsqueda.</td></tr>`;
   tb.querySelectorAll("tr[data-edt]").forEach(tr => tr.addEventListener("click", () => {
-    const k = tr.dataset.edt;
+    const k = EDT_KEYS[Number(tr.dataset.edt)];
     if (EDT_ABIERTOS.has(k)) EDT_ABIERTOS.delete(k); else EDT_ABIERTOS.add(k);
     renderEdt();
   }));
