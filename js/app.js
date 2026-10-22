@@ -1836,6 +1836,7 @@ function fcCalcular(prodMes, meses, p, finObra, iniK, finK) {
   const n = meses.length;
   const z = () => new Array(n).fill(0);
   const val = z(), cobros = z(), egresos = z(), adel = z();
+  const cBruto = z(), amortL = z(), retL = z(), devol = z();
   const directoTotal = prodMes.reduce((s, v) => s + v, 0);
   const enObra = meses.map(k => k >= iniK && k <= finK);
   const nObra = Math.max(enObra.filter(Boolean).length, 1);
@@ -1856,13 +1857,14 @@ function fcCalcular(prodMes, meses, p, finObra, iniK, finK) {
     const amort = venta[i] * p.adelanto / 100, ret = venta[i] * p.retencion / 100;
     retenido += ret;
     sumarLag(cobros, i, p.cobro, venta[i] - amort - ret);
+    sumarLag(cBruto, i, p.cobro, venta[i]); sumarLag(amortL, i, p.cobro, amort); sumarLag(retL, i, p.cobro, ret);
     const costo = prodMes[i] * p.costo / 100 + (enObra[i] ? ggMes : 0);
     sumarLag(egresos, i, p.pago, costo);
   });
-  if (retenido > 0) sumarLag(cobros, Math.max(ix[finK] ?? n - 1, 0), p.devolucion, retenido);
+  if (retenido > 0) { sumarLag(cobros, Math.max(ix[finK] ?? n - 1, 0), p.devolucion, retenido); sumarLag(devol, Math.max(ix[finK] ?? n - 1, 0), p.devolucion, retenido); }
   const neto = meses.map((_, i) => cobros[i] + adel[i] - egresos[i]);
   let a = 0; const acum = neto.map(v => a += v);
-  return { val, cobros, adel, egresos, neto, acum, totalVenta };
+  return { val, cobros, adel, egresos, neto, acum, totalVenta, cBruto, amortL, retL, devol };
 }
 
 function renderFlujoCaja() {
@@ -1941,6 +1943,47 @@ function renderFlujoCaja() {
   const sum = a => a.reduce((s, v) => s + v, 0);
   html += `<tr style="font-weight:700;"><td>Total</td><td style="text-align:right;">${f0(directo)}</td><td style="text-align:right;">${f0(sum(prog.val))}</td><td style="text-align:right;">${f0(sum(prog.cobros) + sum(prog.adel))}</td><td style="text-align:right;">${f0(sum(prog.egresos))}</td><td style="text-align:right;">${f0(sum(prog.neto))}</td><td></td>${hayReal ? "<td></td>" : ""}</tr></tbody>`;
   cont.innerHTML = html;
+  fcRenderOperativo(prog, meses);
+}
+
+let fcChart2 = null;
+function fcRenderOperativo(prog, meses) {
+  const t2 = document.getElementById("fcTabla2");
+  if (!t2) return;
+  const f0 = v => Math.round(v).toLocaleString("es-PE");
+  const n = meses.length;
+  const operativo = meses.map((_, i) => prog.cBruto[i] - prog.retL[i] + prog.devol[i] - prog.egresos[i]);
+  const movAdel = meses.map((_, i) => prog.adel[i] - prog.amortL[i]);
+  let a1 = 0, a2 = 0, a3 = 0;
+  const acOp = operativo.map(v => a1 += v);
+  const saldoAdel = movAdel.map(v => a2 += v);
+  const acTot = meses.map((_, i) => acOp[i] + saldoAdel[i]);
+  const th = h => `<th style="text-align:right;">${h}</th>`;
+  let html = `<thead><tr><th>Mes</th>${th("Cobro de valorización")}${th("Retención (−) / devolución (+)")}${th("Egresos")}${th("Flujo operativo")}${th("Acum. operativo")}${th("Adelanto recibido")}${th("Adelanto amortizado")}${th("Saldo del adelanto")}${th("Flujo neto")}</tr></thead><tbody>`;
+  let saldo = 0;
+  meses.forEach((k, i) => {
+    saldo += movAdel[i];
+    const ret = prog.devol[i] - prog.retL[i];
+    html += `<tr><td>${fcEtiqueta(k)}</td><td style="text-align:right;">${f0(prog.cBruto[i])}</td><td style="text-align:right;">${f0(ret)}</td><td style="text-align:right;">${f0(prog.egresos[i])}</td>
+      <td style="text-align:right;" class="${operativo[i] < 0 ? "bad" : ""}">${f0(operativo[i])}</td><td style="text-align:right;">${f0(acOp[i])}</td>
+      <td style="text-align:right;">${f0(prog.adel[i])}</td><td style="text-align:right;">${f0(-prog.amortL[i])}</td><td style="text-align:right;">${f0(saldo)}</td>
+      <td style="text-align:right;">${f0(operativo[i] + movAdel[i])}</td></tr>`;
+  });
+  const sum = a => a.reduce((s, v) => s + v, 0);
+  html += `<tr style="font-weight:700;"><td>Total</td><td style="text-align:right;">${f0(sum(prog.cBruto))}</td><td style="text-align:right;">${f0(sum(prog.devol) - sum(prog.retL))}</td><td style="text-align:right;">${f0(sum(prog.egresos))}</td><td style="text-align:right;">${f0(sum(operativo))}</td><td></td><td style="text-align:right;">${f0(sum(prog.adel))}</td><td style="text-align:right;">${f0(-sum(prog.amortL))}</td><td style="text-align:right;">${f0(sum(movAdel))}</td><td style="text-align:right;">${f0(sum(operativo) + sum(movAdel))}</td></tr></tbody>`;
+  t2.innerHTML = html;
+  if (fcChart2) fcChart2.destroy();
+  fcChart2 = new Chart(document.getElementById("fcChart2").getContext("2d"), {
+    data: {
+      labels: meses.map(fcEtiqueta),
+      datasets: [
+        { type: "bar", label: "Flujo operativo mensual", data: operativo.map(Math.round), backgroundColor: operativo.map(v => v >= 0 ? "#1baf7a" : "#d03b3b"), yAxisID: "y" },
+        { type: "line", label: "Acumulado operativo", data: acOp.map(Math.round), borderColor: "#12233b", backgroundColor: "#12233b", tension: 0.15, pointRadius: 2, yAxisID: "y" },
+        { type: "line", label: "Saldo del adelanto", data: saldoAdel.map(Math.round), borderColor: "#e07b22", backgroundColor: "#e07b22", tension: 0.15, pointRadius: 2, yAxisID: "y" },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => (v / 1e6).toFixed(1) + " M" } } } },
+  });
 }
 
 function initFlujoCaja() {
