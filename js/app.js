@@ -46,6 +46,8 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   if (CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner") {
     const tabBtn2 = document.getElementById("tabLineasBaseBtn");
     if (tabBtn2) tabBtn2.style.display = "";
+    const tabBtn3 = document.getElementById("tabCargarBtn");
+    if (tabBtn3) tabBtn3.style.display = "";
   }
 
   document.getElementById("logoutBtn").addEventListener("click", async () => {
@@ -58,6 +60,7 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   initRestricciones();
   initEdt();
   initFlujoCaja();
+  initCargar();
   await loadProyectos();
   setupAvanceForm();
   document.getElementById("buscarPartida").addEventListener("input", renderPartidasTable);
@@ -104,6 +107,7 @@ async function loadProyectos(seleccionarId) {
     });
   });
 
+  cgLlenarProyectos(seleccionarId);
   if (PROYECTOS.length > 0) await onProyectoChange(seleccionarId || undefined);
 }
 
@@ -2022,4 +2026,200 @@ function initFlujoCaja() {
   });
   const r = document.getElementById("fcRestablecer");
   if (r) r.addEventListener("click", () => { fcGuardarParams({ ...FC_DEFAULTS }); renderFlujoCaja(); });
+}
+
+// =========================================================
+// Pestaña "Cargar Proyecto": carga de partidas desde Excel (solo admin/planner)
+// Columnas: Frente | EDT | Partida | Unidad | Metrado | Precio unitario | Monto | Inicio | Fin
+// =========================================================
+let CG_FILAS = [];
+
+function cgNorm(t) {
+  return String(t == null ? "" : t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+function cgNum(v) {
+  if (v === "" || v == null) return null;
+  if (typeof v === "number") return v;
+  const n = Number(String(v).replace(/[sS]\/\.?|\s/g, "").replace(/,/g, ""));
+  return isNaN(n) ? NaN : n;
+}
+function cgFecha(v) {
+  if (v === "" || v == null) return null;
+  const p2 = (n) => String(n).padStart(2, "0");
+  if (typeof v === "number") {
+    const d = XLSX.SSF.parse_date_code(v);
+    return d ? `${d.y}-${p2(d.m)}-${p2(d.d)}` : NaN;
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) return `${m[3]}-${p2(m[2])}-${p2(m[1])}`;
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${p2(m[2])}-${p2(m[3])}`;
+  return NaN;
+}
+
+function cgDescargarPlantilla() {
+  const cab = ["Frente", "EDT", "Partida", "Unidad", "Metrado", "Precio unitario", "Monto", "Inicio", "Fin"];
+  const ws = XLSX.utils.aoa_to_sheet([cab]);
+  ws["!cols"] = [{ wch: 34 }, { wch: 48 }, { wch: 48 }, { wch: 9 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
+  const ins = [
+    ["Cómo llenar la hoja Partidas"],
+    [""],
+    ["Una fila por partida (o por rubro de costo). El orden de las filas es el orden de presentación."],
+    ["Frente (obligatorio): agrupador principal, por ejemplo sector, edificio o especialidad."],
+    ["EDT (opcional): ruta jerárquica separada por \" > \", por ejemplo: Sector 1 > Estructuras > Zapatas."],
+    ["Partida (obligatorio): nombre de la partida o rubro."],
+    ["Unidad (opcional): m2, m3, kg, glb, etc."],
+    ["Metrado y Precio unitario: el presupuesto de la partida es Metrado x Precio unitario."],
+    ["Monto (opcional): si no tienes metrado ni precio unitario, escribe solo el monto y se carga como 1 glb."],
+    ["Inicio y Fin (obligatorios): fechas del cronograma de esa partida, en formato dd/mm/aaaa o como fecha de Excel."],
+    ["Sin gastos generales, utilidad ni IGV: solo el costo directo."],
+  ];
+  const wi = XLSX.utils.aoa_to_sheet(ins);
+  wi["!cols"] = [{ wch: 110 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Partidas");
+  XLSX.utils.book_append_sheet(wb, wi, "Instrucciones");
+  XLSX.writeFile(wb, "Plantilla_carga_proyecto.xlsx");
+}
+
+function cgLeerArchivo(file) {
+  const msg = document.getElementById("cgMsg");
+  msg.textContent = "";
+  document.getElementById("cgConfirmar").style.display = "none";
+  document.getElementById("cgResumen").innerHTML = "";
+  document.querySelector("#cgPreview tbody").innerHTML = "";
+  CG_FILAS = [];
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = (e) => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+      const hoja = wb.Sheets["Partidas"] || wb.Sheets[wb.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: true, defval: "" });
+      cgProcesar(filas);
+    } catch (err) {
+      msg.style.color = "var(--red)";
+      msg.textContent = "No se pudo leer el archivo: " + err.message;
+    }
+  };
+  rd.readAsArrayBuffer(file);
+}
+
+function cgProcesar(filas) {
+  const msg = document.getElementById("cgMsg");
+  const claves = { frente: ["frente"], edt: ["edt"], nombre: ["partida", "descripcion", "rubro"], unidad: ["unidad", "und"],
+    metrado: ["metrado"], pu: ["precio unitario", "p u", "pu"], monto: ["monto", "presupuesto", "costo"], ini: ["inicio", "fecha inicio"], fin: ["fin", "fecha fin", "termino"] };
+  const cab = (filas[0] || []).map(cgNorm);
+  const idx = {};
+  for (const k in claves) idx[k] = cab.findIndex(h => claves[k].includes(h));
+  const faltan = ["frente", "nombre", "ini", "fin"].filter(k => idx[k] < 0);
+  if (faltan.length) {
+    msg.style.color = "var(--red)";
+    msg.textContent = "Faltan columnas en la fila 1: " + faltan.map(k => ({ frente: "Frente", nombre: "Partida", ini: "Inicio", fin: "Fin" }[k])).join(", ") + ". Usa la plantilla.";
+    return;
+  }
+  const errores = [], ok = [];
+  let orden = 0;
+  for (let i = 1; i < filas.length; i++) {
+    const r = filas[i];
+    if (r.every(c => c === "" || c == null)) continue;
+    const fila = i + 1;
+    const frente = String(r[idx.frente] ?? "").trim();
+    const nombre = String(r[idx.nombre] ?? "").trim();
+    if (!frente || !nombre) { errores.push(`Fila ${fila}: falta Frente o Partida.`); continue; }
+    const ini = cgFecha(r[idx.ini]), fin = cgFecha(r[idx.fin]);
+    if (!ini || !fin || ini !== ini || fin !== fin) { errores.push(`Fila ${fila}: Inicio o Fin vacío o con formato inválido.`); continue; }
+    if (fin < ini) { errores.push(`Fila ${fila}: la fecha de fin es anterior al inicio.`); continue; }
+    let met = idx.metrado >= 0 ? cgNum(r[idx.metrado]) : null;
+    let pu = idx.pu >= 0 ? cgNum(r[idx.pu]) : null;
+    const monto = idx.monto >= 0 ? cgNum(r[idx.monto]) : null;
+    if ([met, pu, monto].some(x => x !== null && isNaN(x))) { errores.push(`Fila ${fila}: Metrado, Precio unitario o Monto no son números.`); continue; }
+    let unidad = idx.unidad >= 0 ? String(r[idx.unidad] ?? "").trim() : "";
+    if (met === null || pu === null) {
+      if (monto === null) { errores.push(`Fila ${fila}: indica Metrado y Precio unitario, o el Monto.`); continue; }
+      met = 1; pu = monto; unidad = unidad || "glb";
+    }
+    ok.push({ frente, edt: idx.edt >= 0 ? String(r[idx.edt] ?? "").trim() : "", nombre, unidad, metrado_total: met, precio_unitario: pu,
+      presupuesto_total: Math.round(met * pu * 100) / 100, fecha_inicio_base: ini, fecha_fin_base: fin, orden: ++orden });
+  }
+  CG_FILAS = ok;
+  const total = ok.reduce((a, f) => a + f.presupuesto_total, 0);
+  const frentes = new Set(ok.map(f => f.frente));
+  const ini = ok.length ? ok.reduce((a, f) => f.fecha_inicio_base < a ? f.fecha_inicio_base : a, "9999") : "";
+  const fin = ok.length ? ok.reduce((a, f) => f.fecha_fin_base > a ? f.fecha_fin_base : a, "0000") : "";
+  document.getElementById("cgResumen").innerHTML =
+    `<div class="stat-row"><div class="stat-tile"><div class="label">Partidas válidas</div><div class="value">${ok.length}</div></div>` +
+    `<div class="stat-tile"><div class="label">Frentes</div><div class="value">${frentes.size}</div></div>` +
+    `<div class="stat-tile"><div class="label">Presupuesto total</div><div class="value">S/ ${total.toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div></div>` +
+    `<div class="stat-tile"><div class="label">Inicio → Fin</div><div class="value" style="font-size:15px;">${ini ? fmtDate(ini) + " → " + fmtDate(fin) : "—"}</div></div></div>` +
+    (errores.length ? `<div class="card" style="border-color:var(--red); font-size:12.5px;"><b>${errores.length} fila(s) con error (no se cargarán):</b><br>${errores.slice(0, 25).map(escapeHtml).join("<br>")}${errores.length > 25 ? "<br>…" : ""}</div>` : "");
+  document.querySelector("#cgPreview tbody").innerHTML = ok.slice(0, 30).map(f =>
+    `<tr><td>${escapeHtml(f.frente)}</td><td>${escapeHtml(f.nombre)}</td><td>${escapeHtml(f.unidad)}</td><td style="text-align:right;">${f.metrado_total}</td><td style="text-align:right;">${f.precio_unitario}</td><td style="text-align:right;">${f.presupuesto_total.toLocaleString("es-PE")}</td><td>${fmtDate(f.fecha_inicio_base)}</td><td>${fmtDate(f.fecha_fin_base)}</td></tr>`).join("") +
+    (ok.length > 30 ? `<tr><td colspan="8" style="color:var(--text-muted);">… y ${ok.length - 30} partidas más</td></tr>` : "");
+  document.getElementById("cgConfirmar").style.display = ok.length ? "" : "none";
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = ok.length ? "Revisa el resumen. Al confirmar, las partidas actuales del proyecto elegido se reemplazan por estas." : "";
+}
+
+async function cgConfirmar() {
+  const msg = document.getElementById("cgMsg");
+  const pid = document.getElementById("cgProyecto").value;
+  const proy = PROYECTOS.find(p => p.id === pid);
+  if (!pid || !CG_FILAS.length) return;
+  msg.style.color = "var(--text-muted)"; msg.textContent = "Verificando...";
+  const { count: nAv } = await supabaseClient.from("avances_semanales").select("id, partidas!inner(proyecto_id)", { count: "exact", head: true }).eq("partidas.proyecto_id", pid);
+  if (nAv > 0) { msg.style.color = "var(--red)"; msg.textContent = `Este proyecto ya tiene ${nAv} avances registrados. Para no perderlos, no se reemplazan las partidas.`; return; }
+  const { count: nPart } = await supabaseClient.from("partidas").select("id", { count: "exact", head: true }).eq("proyecto_id", pid);
+  const aviso = nPart > 0 ? `Se reemplazarán las ${nPart} partidas actuales de "${proy.nombre}" por ${CG_FILAS.length} partidas nuevas. ¿Continuar?` : `Se cargarán ${CG_FILAS.length} partidas en "${proy.nombre}". ¿Continuar?`;
+  if (!confirm(aviso)) { msg.textContent = ""; return; }
+  document.getElementById("cgConfirmar").disabled = true;
+  try {
+    msg.textContent = "Cargando...";
+    if (nPart > 0) {
+      const { error } = await supabaseClient.from("partidas").delete().eq("proyecto_id", pid);
+      if (error) throw error;
+    }
+    const conEdt = CG_FILAS.some(f => f.edt);
+    const filas = CG_FILAS.map(f => {
+      const o = { proyecto_id: pid, frente: f.frente, nombre: f.nombre, nivel: 4, orden: f.orden, unidad: f.unidad, metrado_total: f.metrado_total,
+        precio_unitario: f.precio_unitario, presupuesto_total: f.presupuesto_total, fecha_inicio_base: f.fecha_inicio_base, fecha_fin_base: f.fecha_fin_base };
+      if (conEdt) o.edt = f.edt || null;
+      return o;
+    });
+    for (let i = 0; i < filas.length; i += 300) {
+      msg.textContent = `Cargando ${Math.min(i + 300, filas.length)} de ${filas.length}...`;
+      const { error } = await supabaseClient.from("partidas").insert(filas.slice(i, i + 300));
+      if (error) throw error;
+    }
+    const ini = filas.reduce((a, f) => f.fecha_inicio_base < a ? f.fecha_inicio_base : a, "9999");
+    const fin = filas.reduce((a, f) => f.fecha_fin_base > a ? f.fecha_fin_base : a, "0000");
+    await supabaseClient.from("proyectos").update({ fecha_inicio_contractual: ini, fecha_fin_contractual: fin }).eq("id", pid);
+    msg.style.color = "var(--green)";
+    msg.textContent = `Listo: ${filas.length} partidas cargadas en "${proy.nombre}".`;
+    CG_FILAS = [];
+    document.getElementById("cgConfirmar").style.display = "none";
+    document.getElementById("cgArchivo").value = "";
+    PROYECTO_ACTUAL_ID = pid;
+    await loadProyectos(pid);
+  } catch (err) {
+    msg.style.color = "var(--red)";
+    msg.textContent = "No se pudo completar la carga: " + (err.message || err) + (err.message && /edt/i.test(err.message) ? " (corre agregar_edt.sql o deja la columna EDT vacía)" : "");
+  } finally {
+    document.getElementById("cgConfirmar").disabled = false;
+  }
+}
+
+function initCargar() {
+  const btn = document.getElementById("cgPlantilla");
+  if (!btn) return;
+  btn.addEventListener("click", cgDescargarPlantilla);
+  document.getElementById("cgArchivo").addEventListener("change", (e) => cgLeerArchivo(e.target.files[0]));
+  document.getElementById("cgConfirmar").addEventListener("click", cgConfirmar);
+}
+function cgLlenarProyectos(idActual) {
+  const sel = document.getElementById("cgProyecto");
+  if (!sel) return;
+  sel.innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join("");
+  if (idActual) sel.value = idActual;
 }
