@@ -354,3 +354,78 @@ form.avance-form .full { grid-column: 1 / -1; }
   margin-right: 5px;
   vertical-align: middle;
 }
+
+/* =========================================================
+   Adaptación a la pantalla: celular, tablet, monitor normal,
+   monitor grande y ultrawide. Solo CSS; no cambia la lógica.
+   ========================================================= */
+
+/* El contenido usa el ancho disponible en vez de quedarse en 1200px */
+main.content { max-width: 100%; }
+.chart-wrap { height: clamp(260px, 38vh, 520px); }
+
+/* --- Monitor normal (laptop / 1080p) --- */
+@media (min-width: 1280px) {
+  main.content { max-width: 1400px; padding: 24px 28px; }
+}
+
+/* --- Monitor grande (1440p / 4K) --- */
+@media (min-width: 1700px) {
+  main.content { max-width: min(96vw, 1900px); }
+  .stat-row { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+}
+
+/* --- Ultrawide (21:9 / 32:9): las tarjetas se acomodan en dos columnas.
+       Las que tienen tablas, formularios, Gantt o indicadores ocupan todo el ancho. --- */
+@media (min-width: 2000px) {
+  main.content { max-width: min(97vw, 3200px); padding: 26px 36px; }
+  .view.active {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 20px;
+    align-items: start;
+  }
+  .view.active > .card,
+  .view.active > .stat-row { margin-bottom: 20px; }
+  .view.active > .stat-row,
+  .view.active > .card:has(table),
+  .view.active > .card:has(form),
+  .view.active > .card:has(.gantt-chart),
+  .view.active > .card:has(select),
+  .view.active > .card:has(.stat-row),
+  .view.active > .card:has(textarea),
+  .view.active > .card:has(input[type=text]) { grid-column: 1 / -1; }
+  .chart-wrap { height: clamp(300px, 36vh, 620px); }
+  .card { padding: 20px; }
+  .card h2 { font-size: 15px; }
+}
+
+/* --- Tablet --- */
+@media (max-width: 1024px) {
+  main.content { padding: 16px; }
+  .card { overflow-x: auto; }
+  .stat-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+}
+
+/* --- Celular --- */
+@media (max-width: 640px) {
+  .app-header { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
+  .app-header h1 { font-size: 14px; }
+  .tabs { padding: 8px 8px 0; gap: 2px; -webkit-overflow-scrolling: touch; }
+  .tab-btn { padding: 10px 12px; font-size: 13px; }
+  main.content { padding: 10px; }
+  .card { padding: 12px; border-radius: 10px; margin-bottom: 12px; }
+  .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat-tile { padding: 10px 12px; }
+  .stat-tile .value { font-size: 18px; }
+  .chart-wrap { height: 260px; }
+  table.data-table { font-size: 12px; }
+  table.data-table th, table.data-table td { padding: 6px 7px; }
+  .gantt-chart { grid-template-columns: 170px 1fr; min-width: 640px; }
+}
+
+/* --- Pantallas táctiles: botones y campos cómodos para el dedo --- */
+@media (pointer: coarse) {
+  .btn, .small-btn, .logout-btn, .tab-btn { min-height: 40px; }
+  input, select, textarea { font-size: 16px; }
+}
