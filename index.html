@@ -76,9 +76,9 @@ function showMsg(text, type) {
   msgBox.innerHTML = `<div class="${type === 'error' ? 'error-msg' : 'success-msg'}">${text}</div>`;
 }
 
-// Ya logueado -> ir directo a la app
+// Ya logueado -> ir a la pantalla de inicio (Control de Obra / Post Venta)
 supabaseClient.auth.getSession().then(({ data }) => {
-  if (data.session) window.location.href = "app.html";
+  if (data.session) window.location.href = "modulos.html";
 });
 
 form.addEventListener("submit", async (e) => {
@@ -102,7 +102,7 @@ form.addEventListener("submit", async (e) => {
     const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
     submitBtn.disabled = false;
     if (error) { showMsg(error.message, "error"); return; }
-    window.location.href = "app.html";
+    window.location.href = "modulos.html";
   }
 });
 </script>
