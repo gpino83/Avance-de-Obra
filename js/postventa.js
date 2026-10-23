@@ -66,13 +66,28 @@ function sumarMeses(iso, m) {
 
   const { data: proys } = await supabaseClient.from("proyectos").select("*").order("created_at");
   PROYECTOS = proys || [];
-  $("pvProyecto").innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("");
-  $("pvProyecto").addEventListener("change", cargar);
+  const puedeCrear = ["admin", "planner"].includes(PERFIL.rol);
+  const pintar = (id) => {
+    $("pvProyecto").innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("") +
+      (puedeCrear ? `<option value="__nuevo">+ Proyecto nuevo…</option>` : "");
+    if (id) $("pvProyecto").value = id;
+  };
+  pintar();
+  $("pvProyecto").addEventListener("change", async () => {
+    if ($("pvProyecto").value !== "__nuevo") { PID = $("pvProyecto").value; await cargar(); return; }
+    const nombre = (prompt("Nombre del proyecto nuevo:") || "").trim();
+    if (!nombre) { pintar(PID); return; }
+    const cliente = (prompt("Cliente (opcional):") || "").trim();
+    const { data, error } = await supabaseClient.from("proyectos").insert({ nombre, cliente: cliente || null }).select().single();
+    if (error) { alert("No se pudo crear el proyecto: " + error.message); pintar(PID); return; }
+    PROYECTOS.push(data); pintar(data.id); await cargar();
+  });
   if (PROYECTOS.length) await cargar();
 })();
 
 async function cargar() {
   PID = $("pvProyecto").value;
+  if (!PID || PID === "__nuevo") return;
   const [u, o, g] = await Promise.all([
     fetchAll(() => supabaseClient.from("pv_unidades").select("*").eq("proyecto_id", PID).order("codigo")),
     fetchAll(() => supabaseClient.from("pv_observaciones").select("*").eq("proyecto_id", PID).order("numero")),

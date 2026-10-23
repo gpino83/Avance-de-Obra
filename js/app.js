@@ -84,7 +84,7 @@ function setupTabs() {
 // ---------------------------------------------------------
 // Proyectos
 // ---------------------------------------------------------
-async function loadProyectos() {
+async function loadProyectos(seleccionarId) {
   const { data, error } = await supabaseClient.from("proyectos").select("*").order("created_at");
   if (error) { console.error(error); return; }
   PROYECTOS = data || [];
@@ -94,18 +94,36 @@ async function loadProyectos() {
     document.getElementById("proyectoSelectAvance"),
     document.getElementById("proyectoSelectPartidas"),
   ];
+  const puedeCrear = CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner";
   selects.forEach(sel => {
-    sel.innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join("");
-    sel.addEventListener("change", () => onProyectoChange());
+    sel.innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join("") +
+      (puedeCrear ? `<option value="__nuevo">+ Proyecto nuevo…</option>` : "");
+    sel.addEventListener("change", async () => {
+      if (sel.value === "__nuevo") { await crearProyecto(sel); return; }
+      onProyectoChange(sel.value);
+    });
   });
 
-  if (PROYECTOS.length > 0) await onProyectoChange();
+  if (PROYECTOS.length > 0) await onProyectoChange(seleccionarId || undefined);
 }
 
-async function onProyectoChange() {
-  const proyectoId = document.getElementById("proyectoSelectDash").value ||
+async function crearProyecto(sel) {
+  const nombre = (prompt("Nombre del proyecto nuevo:") || "").trim();
+  const volver = () => { sel.value = (PROYECTOS[0] && (PROYECTOS.find(p => p.id === PROYECTO_ACTUAL_ID) || PROYECTOS[0]).id) || ""; };
+  if (!nombre) { volver(); return; }
+  const cliente = (prompt("Cliente (opcional):") || "").trim();
+  const { data, error } = await supabaseClient.from("proyectos").insert({ nombre, cliente: cliente || null }).select().single();
+  if (error) { alert("No se pudo crear el proyecto: " + error.message); volver(); return; }
+  PROYECTO_ACTUAL_ID = data.id;
+  await loadProyectos(data.id);
+}
+
+let PROYECTO_ACTUAL_ID = null;
+async function onProyectoChange(idElegido) {
+  const proyectoId = idElegido || document.getElementById("proyectoSelectDash").value ||
                       document.getElementById("proyectoSelectAvance").value ||
                       document.getElementById("proyectoSelectPartidas").value;
+  PROYECTO_ACTUAL_ID = proyectoId;
   // sincroniza los 3 selects al mismo proyecto
   [document.getElementById("proyectoSelectDash"),
    document.getElementById("proyectoSelectAvance"),
