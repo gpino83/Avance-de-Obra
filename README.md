@@ -30,7 +30,7 @@ control-avance-obra/
    ~1011 partidas, ~400 KB de texto — el editor puede tardar unos segundos en pegar y
    correr, es normal). Esto carga la **línea base
    valorizada real**: 1011 partidas extraídas del itemizado de presupuesto
-   (`ITEMIZADO_PAQ.1_REV3_INARCO`), cada una con su metrado, precio unitario (P.U.) y
+   (`ITEMIZADO_PAQ.1_REV3_ZUHAUS`), cada una con su metrado, precio unitario (P.U.) y
    presupuesto (S/), agrupadas por frente = *Edificio Nuevo / Reforzamiento* × especialidad
    (Estructuras, Arquitectura, IIEE, IISS, ACI, HVAC, Obras Previas, Obras Preliminares).
 
