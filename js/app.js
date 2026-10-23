@@ -40,6 +40,8 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   document.getElementById("userRole").textContent = "(" + CURRENT_PROFILE.rol + ")";
 
   if (CURRENT_PROFILE.rol === "admin") {
+    const btnDel = document.getElementById("btnEliminarProyecto");
+    if (btnDel) { btnDel.style.display = ""; btnDel.addEventListener("click", eliminarProyecto); }
     const tabBtn = document.getElementById("tabUsuariosBtn");
     if (tabBtn) tabBtn.style.display = "";
   }
@@ -2222,4 +2224,28 @@ function cgLlenarProyectos(idActual) {
   if (!sel) return;
   sel.innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join("");
   if (idActual) sel.value = idActual;
+}
+
+// ---------------------------------------------------------
+// Eliminar proyecto (solo admin): borra el proyecto y todo lo que depende de él
+// ---------------------------------------------------------
+async function eliminarProyecto() {
+  const pid = document.getElementById("proyectoSelectDash").value;
+  const proy = PROYECTOS.find(p => p.id === pid);
+  if (!proy) return;
+  const cuenta = async (tabla) => {
+    const { count, error } = await supabaseClient.from(tabla).select("id", { count: "exact", head: true }).eq("proyecto_id", pid);
+    return error ? 0 : (count || 0);
+  };
+  const { count: nAv } = await supabaseClient.from("avances_semanales").select("id, partidas!inner(proyecto_id)", { count: "exact", head: true }).eq("partidas.proyecto_id", pid);
+  const [nPart, nRest, nObs, nUni] = await Promise.all([cuenta("partidas"), cuenta("restricciones"), cuenta("pv_observaciones"), cuenta("pv_unidades")]);
+  const detalle = `${nPart} partidas, ${nAv || 0} avances registrados, ${nRest} restricciones, ${nUni} unidades y ${nObs} observaciones de Post Venta`;
+  const escrito = prompt(`Vas a ELIMINAR el proyecto "${proy.nombre}" con todos sus datos (${detalle}). Esto no se puede deshacer.\n\nPara confirmar, escribe el nombre exacto del proyecto:`);
+  if (escrito === null) return;
+  if (escrito.trim() !== proy.nombre.trim()) { alert("El nombre no coincide. No se eliminó nada."); return; }
+  const { error } = await supabaseClient.from("proyectos").delete().eq("id", pid);
+  if (error) { alert("No se pudo eliminar: " + error.message); return; }
+  PROYECTO_ACTUAL_ID = null;
+  await loadProyectos();
+  alert(`Proyecto "${proy.nombre}" eliminado.`);
 }
