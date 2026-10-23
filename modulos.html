@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inicio</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  .mod-wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; gap: 22px; }
+  .mod-top { text-align: center; }
+  .mod-top h1 { font-size: 22px; margin: 0 0 4px; }
+  .mod-top p { margin: 0; color: var(--text-secondary); font-size: 13.5px; }
+  .mod-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 340px)); gap: 18px; justify-content: center; width: 100%; max-width: 760px; }
+  .mod-card { display: block; text-decoration: none; color: inherit; background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; padding: 28px 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.05); transition: transform .12s, box-shadow .12s, border-color .12s; }
+  .mod-card:hover { transform: translateY(-3px); border-color: var(--blue); box-shadow: 0 12px 34px rgba(42,120,214,0.15); }
+  .mod-card .ico { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 14px; }
+  .mod-card h2 { font-size: 17px; margin: 0 0 6px; }
+  .mod-card p { margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+  .mod-foot { font-size: 12.5px; color: var(--text-muted); }
+  .mod-foot a { color: var(--blue); cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="mod-wrap">
+  <div class="mod-top">
+    <h1>¿Qué quieres abrir?</h1>
+    <p id="saludo">&nbsp;</p>
+  </div>
+  <div class="mod-grid" id="modGrid"></div>
+  <div class="mod-foot"><a id="salir">Cerrar sesión</a></div>
+</div>
+
+<script src="js/supabase-config.js"></script>
+<script>
+(async function () {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "index.html"; return; }
+  const { data: perfil } = await supabaseClient.from("perfiles").select("*").eq("id", session.user.id).single();
+  const rol = (perfil && perfil.rol) || "residente";
+  document.getElementById("saludo").textContent = "Hola, " + ((perfil && perfil.nombre_completo) || session.user.email);
+
+  const OBRA = { href: "app.html", ico: "🏗️", bg: "#e8f0fb", titulo: "Control de Obra", txt: "Avance, curva S, restricciones, EDT y flujo de caja del proyecto." };
+  const PV = { href: "postventa.html", ico: "🛠️", bg: "#e6f6ef", titulo: "Post Venta", txt: "Observaciones por unidad, actas de entrega, garantías y tablero de seguimiento." };
+  const modulos = [];
+  if (rol !== "postventa") modulos.push(OBRA);
+  if (["admin", "planner", "postventa", "viewer"].includes(rol)) modulos.push(PV);
+
+  // Un solo módulo disponible: entra directo
+  if (modulos.length === 1 && !location.search.includes("elegir")) { window.location.replace(modulos[0].href); return; }
+
+  document.getElementById("modGrid").innerHTML = modulos.map(m =>
+    `<a class="mod-card" href="${m.href}"><div class="ico" style="background:${m.bg}">${m.ico}</div><h2>${m.titulo}</h2><p>${m.txt}</p></a>`).join("");
+  document.getElementById("salir").addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "index.html";
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Post Venta</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  .in { padding:7px 10px; border-radius:8px; border:1px solid var(--border); font:inherit; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
+  .grid-f { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0 14px; }
+  .full { grid-column:1/-1; }
+  .back { color:var(--blue); text-decoration:none; font-size:12.5px; margin-right:6px; }
+  .bar .btn, .field .btn { width:auto; }
+  .mini { width:auto !important; padding:3px 8px; font-size:11.5px; }
+  .bar-h { height:10px; border-radius:5px; background:#e9e8e2; overflow:hidden; min-width:90px; }
+  .bar-h > i { display:block; height:100%; background:var(--aqua); }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1><a class="back" href="modulos.html?elegir" id="backLink" style="display:none;">← Módulos</a>Post Venta</h1>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="who">Hola, <b id="userName">...</b> <span id="userRole"></span></span>
+    <button class="logout-btn" id="logoutBtn">Salir</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-view="tablero">Tablero</button>
+  <button class="tab-btn" data-view="obs">Observaciones</button>
+  <button class="tab-btn" data-view="unidades">Unidades y Entregas</button>
+  <button class="tab-btn" data-view="garantias">Garantías</button>
+</nav>
+
+<main class="content">
+  <div class="card">
+    <label style="font-size:12.5px; color:var(--text-secondary);">Proyecto</label><br>
+    <select id="pvProyecto" class="in" style="margin-top:6px;"></select>
+  </div>
+
+  <!-- ============ TABLERO ============ -->
+  <section class="view active" id="view-tablero">
+    <div class="stat-row" id="pvStats"></div>
+    <div class="card">
+      <h2>Observaciones por especialidad</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="pvTabEsp"><thead><tr><th>Especialidad</th><th style="text-align:right;">Total</th><th style="text-align:right;">Abiertas</th><th style="text-align:right;">Cerradas</th><th>Cierre</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Pendientes por responsable</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="pvTabResp"><thead><tr><th>Responsable</th><th style="text-align:right;">Pendientes</th><th style="text-align:right;">Vencidas</th><th style="text-align:right;">Antigüedad prom. (días)</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Garantías por vencer (próximos 90 días)</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="pvTabGarVenc"><thead><tr><th>Unidad</th><th>Especialidad</th><th>Vence</th><th style="text-align:right;">Días</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ OBSERVACIONES ============ -->
+  <section class="view" id="view-obs">
+    <form class="card" id="obsForm" style="display:none;">
+      <h2 id="obsFormTitulo">Nueva observación</h2>
+      <div class="grid-f">
+        <div class="field"><label>Unidad</label><select id="ofUnidad" class="in"></select></div>
+        <div class="field"><label>Especialidad</label><select id="ofEsp" class="in"></select></div>
+        <div class="field"><label>Ambiente</label><input type="text" id="ofAmb" class="in" placeholder="Cocina, baño principal..."></div>
+        <div class="field"><label>Prioridad</label><select id="ofPrio" class="in"><option>Alta</option><option selected>Media</option><option>Baja</option></select></div>
+        <div class="field full"><label>Descripción</label><input type="text" id="ofDesc" class="in" required></div>
+        <div class="field"><label>Responsable</label><input type="text" id="ofResp" class="in" list="pvRespList"><datalist id="pvRespList"></datalist></div>
+        <div class="field"><label>Estado</label><select id="ofEstado" class="in"><option>Abierta</option><option>En proceso</option><option>Cerrada</option><option>Rechazada</option></select></div>
+        <div class="field"><label>Fecha de reporte</label><input type="date" id="ofFRep" class="in"></div>
+        <div class="field"><label>Fecha compromiso</label><input type="date" id="ofFComp" class="in"></div>
+        <div class="field"><label>Fecha de cierre</label><input type="date" id="ofFCierre" class="in"></div>
+        <div class="field full"><label>Comentarios</label><input type="text" id="ofCom" class="in"></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="obsCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="obsMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+    <div class="card">
+      <h2>Observaciones</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="obsNueva">+ Nueva observación</button>
+        <select id="obsFEstado" class="in"><option value="abiertas">Pendientes</option><option value="todas">Todas</option><option>Abierta</option><option>En proceso</option><option>Cerrada</option><option>Rechazada</option></select>
+        <select id="obsFEsp" class="in"></select>
+        <input type="text" id="obsBuscar" class="in" placeholder="Buscar unidad, cliente, descripción..." style="flex:1; min-width:180px;">
+        <button class="btn secondary" type="button" id="obsCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="obsTabla"><thead><tr><th>N°</th><th>Unidad</th><th>Cliente</th><th>Especialidad</th><th>Ambiente</th><th>Descripción</th><th>Prioridad</th><th>Responsable</th><th>Reporte</th><th>Compromiso</th><th>Estado</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ UNIDADES ============ -->
+  <section class="view" id="view-unidades">
+    <form class="card" id="uniForm" style="display:none;">
+      <h2 id="uniFormTitulo">Nueva unidad</h2>
+      <div class="grid-f">
+        <div class="field"><label>Código (ej. Dpto 501)</label><input type="text" id="ufCodigo" class="in" required></div>
+        <div class="field"><label>Tipo</label><input type="text" id="ufTipo" class="in" placeholder="Departamento, local, estacionamiento"></div>
+        <div class="field"><label>Piso</label><input type="text" id="ufPiso" class="in"></div>
+        <div class="field"><label>Cliente</label><input type="text" id="ufCliente" class="in"></div>
+        <div class="field"><label>Teléfono</label><input type="text" id="ufTel" class="in"></div>
+        <div class="field"><label>Correo</label><input type="email" id="ufMail" class="in"></div>
+        <div class="field"><label>Estado de entrega</label><select id="ufEstado" class="in"><option>Pendiente</option><option>Programada</option><option>Entregada</option></select></div>
+        <div class="field"><label>Fecha programada</label><input type="date" id="ufFProg" class="in"></div>
+        <div class="field"><label>Fecha de entrega (acta)</label><input type="date" id="ufFEnt" class="in"></div>
+        <div class="field"><label>Recibido por</label><input type="text" id="ufRecibe" class="in"></div>
+        <div class="field full"><label>Observaciones del acta</label><input type="text" id="ufActa" class="in"></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="uniCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="uniMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+    <div class="card">
+      <h2>Unidades y actas de entrega</h2>
+      <p class="save-hint">Al registrar una garantía para una unidad entregada, la fecha de inicio se propone con la fecha del acta de entrega.</p>
+      <div class="bar">
+        <button class="btn" type="button" id="uniNueva">+ Nueva unidad</button>
+        <button class="btn secondary" type="button" id="uniImportar">Importar lista (pegar desde Excel)</button>
+        <select id="uniFEstado" class="in"><option value="todas">Todas</option><option>Pendiente</option><option>Programada</option><option>Entregada</option></select>
+        <input type="text" id="uniBuscar" class="in" placeholder="Buscar..." style="flex:1; min-width:160px;">
+        <button class="btn secondary" type="button" id="uniCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div id="uniImpBox" style="display:none; margin-bottom:12px;">
+        <p class="save-hint">Pega filas de Excel con columnas: Código, Tipo, Piso, Cliente, Teléfono, Correo (una unidad por fila).</p>
+        <textarea id="uniImpTxt" class="in" rows="6" style="width:100%;"></textarea>
+        <div style="margin-top:6px; display:flex; gap:8px;"><button class="btn" type="button" id="uniImpOk">Importar</button><button class="btn secondary" type="button" id="uniImpNo">Cancelar</button></div>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="uniTabla"><thead><tr><th>Unidad</th><th>Tipo</th><th>Piso</th><th>Cliente</th><th>Contacto</th><th>Entrega</th><th>Fecha</th><th>Obs. abiertas</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ GARANTIAS ============ -->
+  <section class="view" id="view-garantias">
+    <form class="card" id="garForm" style="display:none;">
+      <h2>Nueva garantía</h2>
+      <div class="grid-f">
+        <div class="field"><label>Unidad (vacío = general del proyecto)</label><select id="gfUnidad" class="in"></select></div>
+        <div class="field"><label>Especialidad</label><select id="gfEsp" class="in"></select></div>
+        <div class="field"><label>Proveedor</label><input type="text" id="gfProv" class="in"></div>
+        <div class="field"><label>Inicio de garantía</label><input type="date" id="gfIni" class="in" required></div>
+        <div class="field"><label>Plazo (meses)</label><input type="number" id="gfPlazo" class="in" min="1" step="1" required></div>
+        <div class="field full"><label>Descripción</label><input type="text" id="gfDesc" class="in"></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="garCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="garMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+    <div class="card">
+      <h2>Garantías</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="garNueva">+ Nueva garantía</button>
+        <select id="garFEstado" class="in"><option value="todas">Todas</option><option>Vigente</option><option>Por vencer</option><option>Vencida</option></select>
+        <button class="btn secondary" type="button" id="garCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="garTabla"><thead><tr><th>Unidad</th><th>Especialidad</th><th>Proveedor</th><th>Inicio</th><th style="text-align:right;">Plazo (meses)</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+</main>
+
+<script src="js/supabase-config.js"></script>
+<script src="js/postventa.js"></script>
+</body>
+</html>
