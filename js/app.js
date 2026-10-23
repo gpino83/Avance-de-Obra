@@ -30,6 +30,11 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
     .eq("id", CURRENT_USER.id)
     .single();
   CURRENT_PROFILE = perfil || { rol: "residente", nombre_completo: CURRENT_USER.email };
+  if (CURRENT_PROFILE.rol === "postventa") { window.location.href = "postventa.html"; return; }
+  if (["admin", "planner", "viewer"].includes(CURRENT_PROFILE.rol)) {
+    const back = document.getElementById("backLink");
+    if (back) back.style.display = "";
+  }
 
   document.getElementById("userName").textContent = CURRENT_PROFILE.nombre_completo || CURRENT_USER.email;
   document.getElementById("userRole").textContent = "(" + CURRENT_PROFILE.rol + ")";
