@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -36,6 +37,7 @@
   <button class="tab-btn" data-view="partidas">Partidas (Línea Base)</button>
   <button class="tab-btn" data-view="usuarios" id="tabUsuariosBtn" style="display:none;">Usuarios / Asignaciones</button>
   <button class="tab-btn" data-view="lineasbase" id="tabLineasBaseBtn" style="display:none;">Líneas Base</button>
+  <button class="tab-btn" data-view="cargar" id="tabCargarBtn" style="display:none;">Cargar Proyecto</button>
 </nav>
 
 <main class="content">
@@ -385,6 +387,28 @@
         necesitan asignación aquí. Los cambios se guardan solos al marcar/desmarcar cada casilla.
       </p>
       <div id="asignacionesWrap" style="overflow-x:auto;"></div>
+    </div>
+  </section>
+
+  <!-- ===================== CARGAR PROYECTO (Excel) ===================== -->
+  <section class="view" id="view-cargar">
+    <div class="card">
+      <h2>Cargar partidas desde Excel</h2>
+      <p class="save-hint">1) Descarga la plantilla y llénala con el presupuesto y las fechas del cronograma (una fila por partida). 2) Elige el proyecto destino y sube el archivo. 3) Revisa el resumen y confirma. Las partidas actuales del proyecto elegido se reemplazan; si ya tiene avances registrados, no se permite.</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:10px 0;">
+        <button class="btn secondary" type="button" id="cgPlantilla" style="width:auto;">Descargar plantilla (Excel)</button>
+        <select id="cgProyecto" style="padding:7px 10px; border-radius:8px; border:1px solid var(--border);"></select>
+        <input type="file" id="cgArchivo" accept=".xlsx,.xls">
+      </div>
+      <div id="cgResumen"></div>
+      <div style="overflow-x:auto;">
+        <table class="data-table" id="cgPreview">
+          <thead><tr><th>Frente</th><th>Partida</th><th>Und</th><th style="text-align:right;">Metrado</th><th style="text-align:right;">P.U.</th><th style="text-align:right;">Presupuesto</th><th>Inicio</th><th>Fin</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;"><button class="btn" type="button" id="cgConfirmar" style="display:none; width:auto;">Cargar al proyecto</button></div>
+      <div id="cgMsg" style="font-size:12.5px; margin-top:8px;"></div>
     </div>
   </section>
 
