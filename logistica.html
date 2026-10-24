@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Logística</title>
+<title>Procura</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
@@ -22,7 +22,7 @@
 <body>
 
 <header class="app-header">
-  <h1><a class="back" href="modulos.html?elegir" id="backLink" style="display:none;">← Módulos</a>Logística</h1>
+  <h1><a class="back" href="modulos.html?elegir" id="backLink" style="display:none;">← Módulos</a>Procura</h1>
   <div style="display:flex; align-items:center; gap:14px;">
     <span class="who">Hola, <b id="userName">...</b> <span id="userRole"></span></span>
     <button class="logout-btn" id="logoutBtn">Salir</button>
@@ -31,7 +31,7 @@
 
 <nav class="tabs">
   <button class="tab-btn active" data-view="tablero">Tablero</button>
-  <button class="tab-btn" data-view="paquetes">Procura y Subcontratas</button>
+  <button class="tab-btn" data-view="paquetes">Materiales y Subcontratas</button>
   <button class="tab-btn" data-view="almacen">Almacén</button>
   <button class="tab-btn" data-view="pagos">Estado de pagos</button>
 </nav>
@@ -94,7 +94,7 @@
     </form>
 
     <div class="card">
-      <h2>Paquetes de procura y subcontratas</h2>
+      <h2>Materiales y subcontratas</h2>
       <div class="bar">
         <button class="btn" type="button" id="pkNuevo">+ Nuevo paquete</button>
         <select id="pkFTipo" class="in"><option value="">Materiales y subcontratas</option><option>Material</option><option>Subcontrata</option></select>
