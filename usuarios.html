@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Usuarios</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  .in { padding:7px 10px; border-radius:8px; border:1px solid var(--border); font:inherit; }
+  .grid-f { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0 14px; }
+  .full { grid-column:1/-1; }
+  .back { color:var(--blue); text-decoration:none; font-size:12.5px; margin-right:6px; }
+  .mini { width:auto !important; padding:3px 8px; font-size:11.5px; }
+  .card + .card { margin-top:16px; }
+</style>
+</head>
+<body>
+<div class="app-logo-bar" style="background:#fff;padding:8px 16px 0;text-align:left;">
+  <img src="logo.png" alt="Logo" style="height:64px;width:auto;display:block;">
+</div>
+
+<header class="app-header">
+  <h1><a class="back" href="modulos.html?elegir">← Módulos</a>Usuarios</h1>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="who">Hola, <b id="userName">...</b> <span id="userRole"></span></span>
+    <button class="logout-btn" id="logoutBtn">Salir</button>
+  </div>
+</header>
+
+<main class="content">
+  <div class="card">
+    <h2>Nuevo usuario</h2>
+    <p class="save-hint">Entrega al usuario el código de la empresa, su usuario y su contraseña. Con eso ingresa desde la pantalla de inicio. Código de tu empresa: <b id="codEmpresa">—</b></p>
+    <form id="nuForm">
+      <div class="grid-f">
+        <div class="field"><label>Nombre completo</label><input class="in" id="nuNombre" required></div>
+        <div class="field"><label>Usuario (minúsculas, sin espacios)</label><input class="in" id="nuUsuario" required pattern="[a-z0-9_-]{2,30}" autocapitalize="none" spellcheck="false"></div>
+        <div class="field"><label>Rol</label>
+          <select class="in" id="nuRol">
+            <option value="residente">Residente</option><option value="planner">Planner</option><option value="admin">Administrador</option>
+            <option value="viewer">Solo lectura</option><option value="logistica">Procura</option><option value="calidad">Calidad</option>
+            <option value="ssoma">SSOMA</option><option value="postventa">Post Venta</option>
+          </select></div>
+        <div class="field"><label>Contraseña (mínimo 8 caracteres)</label><input class="in" id="nuClave" type="text" minlength="8" required autocomplete="off"></div>
+        <div class="field full"><button class="btn" type="submit" style="width:auto;">Crear usuario</button> <span id="nuMsg" style="font-size:12.5px;"></span></div>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Usuarios de la empresa</h2>
+    <div style="overflow-x:auto;"><table class="data-table" id="tUsr"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="uMsg" style="font-size:12.5px; margin-top:8px;"></div>
+  </div>
+</main>
+<footer style="text-align:center;font-size:12px;color:#8a8a85;padding:18px 12px 22px;">© 2026 ZUHAUS GROUP. Todos los derechos reservados.</footer>
+
+<script src="js/supabase-config.js"></script>
+<script src="js/usuarios.js"></script>
+</body>
+</html>

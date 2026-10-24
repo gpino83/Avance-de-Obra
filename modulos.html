@@ -55,6 +55,7 @@
   const SS = { href: "ssoma.html", ico: "🦺", bg: "#fdebe3", titulo: "SSOMA", txt: "Inspecciones, charlas, incidentes, permisos de trabajo, EPP, medio ambiente e índices de seguridad." };
   if (["admin", "planner", "residente", "ssoma", "viewer"].includes(rol)) modulos.push(SS);
   if (["admin", "planner", "postventa", "viewer"].includes(rol)) modulos.push(PV);
+  if (rol === "admin") modulos.push({ href: "usuarios.html", ico: "👥", bg: "#eceff3", titulo: "Usuarios", txt: "Crear usuarios de tu empresa, asignar roles, restablecer contraseñas y desactivar accesos." });
 
   // Un solo módulo disponible: entra directo
   if (modulos.length === 1 && !location.search.includes("elegir")) { window.location.replace(modulos[0].href); return; }
