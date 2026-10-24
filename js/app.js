@@ -32,6 +32,7 @@ let OVERRIDES_EDITANDO = {}; // partida_id -> fila de partidas_revision de la re
   CURRENT_PROFILE = perfil || { rol: "residente", nombre_completo: CURRENT_USER.email };
   if (CURRENT_PROFILE.rol === "postventa") { window.location.href = "postventa.html"; return; }
   if (CURRENT_PROFILE.rol === "logistica") { window.location.href = "logistica.html"; return; }
+  if (CURRENT_PROFILE.rol === "calidad") { window.location.href = "calidad.html"; return; }
   if (["admin", "planner", "viewer"].includes(CURRENT_PROFILE.rol)) {
     const back = document.getElementById("backLink");
     if (back) back.style.display = "";
