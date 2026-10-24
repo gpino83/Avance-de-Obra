@@ -66,22 +66,8 @@ function sumarMeses(iso, m) {
 
   const { data: proys } = await supabaseClient.from("proyectos").select("*").order("created_at");
   PROYECTOS = proys || [];
-  const puedeCrear = ["admin", "planner"].includes(PERFIL.rol);
-  const pintar = (id) => {
-    $("pvProyecto").innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("") +
-      (puedeCrear ? `<option value="__nuevo">+ Proyecto nuevo…</option>` : "");
-    if (id) $("pvProyecto").value = id;
-  };
-  pintar();
-  $("pvProyecto").addEventListener("change", async () => {
-    if ($("pvProyecto").value !== "__nuevo") { PID = $("pvProyecto").value; await cargar(); return; }
-    const nombre = (prompt("Nombre del proyecto nuevo:") || "").trim();
-    if (!nombre) { pintar(PID); return; }
-    const cliente = (prompt("Cliente (opcional):") || "").trim();
-    const { data, error } = await supabaseClient.from("proyectos").insert({ nombre, cliente: cliente || null }).select().single();
-    if (error) { alert("No se pudo crear el proyecto: " + error.message); pintar(PID); return; }
-    PROYECTOS.push(data); pintar(data.id); await cargar();
-  });
+  $("pvProyecto").innerHTML = PROYECTOS.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("");
+  $("pvProyecto").addEventListener("change", cargar);
   if (PROYECTOS.length) await cargar();
 })();
 
@@ -182,8 +168,8 @@ function renderObs() {
     const al = estadoAlerta(o);
     const cls = o.estado === "Cerrada" ? "ok" : o.estado === "Rechazada" ? "" : o.estado === "En proceso" ? "warn" : "late";
     const prio = o.prioridad === "Alta" ? ` style="color:var(--red);font-weight:600;"` : "";
-    return `<tr><td>${o.numero}</td><td>${esc(u ? u.codigo : "—")}</td><td>${esc(u ? u.cliente : "")}</td><td>${esc(o.especialidad)}</td><td>${esc(o.ambiente)}</td><td style="min-width:220px;">${esc(o.descripcion)}</td><td${prio}>${o.prioridad}</td><td>${esc(o.responsable)}</td><td>${fd(o.fecha_reporte)}</td><td>${fd(o.fecha_compromiso)}</td><td><span class="badge ${cls}">${o.estado}</span></td><td>${al ? `<span class="badge late">Vencida ${dias(o.fecha_compromiso, hoy)} d</span>` : ""}</td><td style="white-space:nowrap;">${puedeEditar() ? `<button class="btn secondary mini" data-oe="${o.id}">Editar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-od="${o.id}">Borrar</button>` : ""}</td></tr>`;
-  }).join("") || `<tr><td colspan="13" style="color:var(--text-muted);">No hay observaciones con este filtro.</td></tr>`;
+    return `<tr><td>${o.numero}</td><td>${esc(u ? u.codigo : "—")}</td><td>${esc(u ? u.cliente : "")}</td><td>${esc(o.especialidad)}</td><td>${esc(o.ambiente)}</td><td style="min-width:220px;">${esc(o.descripcion)}</td><td${prio}>${o.prioridad}</td><td>${esc(o.responsable)}</td><td>${fd(o.fecha_reporte)}</td><td>${fd(o.fecha_compromiso)}</td><td><span class="badge ${cls}">${o.estado}</span></td><td>${al ? `<span class="badge late">Vencida ${dias(o.fecha_compromiso, hoy)} d</span>` : ""}</td><td>${(o.fotos || []).length + (o.fotos_cierre || []).length ? `<button class="btn secondary mini" data-of="${o.id}">📷 ${(o.fotos || []).length + (o.fotos_cierre || []).length}</button>` : ""}</td><td style="white-space:nowrap;">${puedeEditar() ? `<button class="btn secondary mini" data-oe="${o.id}">Editar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-od="${o.id}">Borrar</button>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="14" style="color:var(--text-muted);">No hay observaciones con este filtro.</td></tr>`;
 }
 
 function abrirObs(o) {
@@ -200,6 +186,10 @@ function abrirObs(o) {
   $("ofFComp").value = o ? (o.fecha_compromiso || "") : "";
   $("ofFCierre").value = o ? (o.fecha_cierre || "") : "";
   $("ofCom").value = o ? (o.comentarios || "") : "";
+  KEEP = { rep: o ? (o.fotos || []).slice() : [], cie: o ? (o.fotos_cierre || []).slice() : [] };
+  PEND = { rep: [], cie: [] };
+  ["ofFotosIn", "ofFotosCieIn"].forEach(id => $(id).value = "");
+  pintarFotosForm();
   $("obsMsg").textContent = "";
   $("obsForm").style.display = "";
   $("obsForm").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -215,11 +205,48 @@ async function guardarObs(e) {
     fecha_reporte: v("ofFRep"), fecha_compromiso: v("ofFComp"), comentarios: v("ofCom"),
     fecha_cierre: v("ofFCierre") || (estado === "Cerrada" ? hoyISO() : null),
   };
+  const btn = $("obsForm").querySelector('button[type="submit"]');
+  try {
+    if (PEND.rep.length || PEND.cie.length) { btn.disabled = true; $("obsMsg").textContent = "Subiendo fotos..."; }
+    fila.fotos = KEEP.rep.concat(PEND.rep.length ? await FotosObra.subir(PEND.rep, `${PID}/postventa`) : []);
+    fila.fotos_cierre = KEEP.cie.concat(PEND.cie.length ? await FotosObra.subir(PEND.cie, `${PID}/postventa`) : []);
+  } catch (err) { btn.disabled = false; $("obsMsg").textContent = "No se pudieron subir las fotos: " + (err.message || err); return; }
+  btn.disabled = false;
   const q = EDIT_OBS ? supabaseClient.from("pv_observaciones").update(fila).eq("id", EDIT_OBS.id) : supabaseClient.from("pv_observaciones").insert(fila);
   const { error } = await q;
   if (error) { $("obsMsg").textContent = "No se pudo guardar: " + error.message; return; }
   $("obsForm").style.display = "none";
   await cargar();
+}
+
+// ---------------- Fotos de observaciones ----------------
+let KEEP = { rep: [], cie: [] }, PEND = { rep: [], cie: [] };
+
+async function pintarFotosForm() {
+  for (const [clave, cont, cnt] of [["rep", "ofFotosAct", "ofFotosCnt"], ["cie", "ofFotosCieAct", "ofFotosCieCnt"]]) {
+    $(cnt).textContent = PEND[clave].length ? PEND[clave].length + " foto(s) por subir al guardar" : "";
+    const el = $(cont); el.innerHTML = "";
+    for (const ruta of KEEP[clave]) {
+      const u = await FotosObra.url(ruta); if (!u) continue;
+      const d = document.createElement("div"); d.className = "foto-th";
+      d.innerHTML = `<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="foto"></a><button type="button" title="Quitar" data-q="${clave}" data-r="${esc(ruta)}">×</button>`;
+      el.appendChild(d);
+    }
+  }
+}
+
+async function verFotos(o) {
+  const u = unidadPorId(o.unidad_id);
+  $("fmTitulo").textContent = `Observación N° ${o.numero}${u ? " — " + u.codigo : ""}`;
+  for (const [id, rutas] of [["fmRep", o.fotos || []], ["fmCie", o.fotos_cierre || []]]) {
+    const cont = $(id); cont.innerHTML = rutas.length ? "" : `<span class="save-hint">Sin fotos.</span>`;
+    for (const r of rutas) {
+      const url = await FotosObra.url(r); if (!url) continue;
+      const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener";
+      a.innerHTML = `<img src="${url}" alt="foto">`; cont.appendChild(a);
+    }
+  }
+  $("fotoModal").style.display = "flex";
 }
 
 // ---------------- Unidades ----------------
@@ -332,11 +359,21 @@ function enlazarEventos() {
   $("obsNueva").addEventListener("click", () => abrirObs(null));
   $("obsCancelar").addEventListener("click", () => $("obsForm").style.display = "none");
   $("obsForm").addEventListener("submit", guardarObs);
+  [["ofFotosIn", "rep"], ["ofFotosCieIn", "cie"]].forEach(([id, clave]) => $(id).addEventListener("change", (e) => {
+    PEND[clave] = PEND[clave].concat([...e.target.files]); e.target.value = ""; pintarFotosForm();
+  }));
+  $("obsForm").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-q]"); if (!b) return;
+    KEEP[b.dataset.q] = KEEP[b.dataset.q].filter(r => r !== b.dataset.r); pintarFotosForm();
+  });
+  $("fmCerrar").addEventListener("click", () => $("fotoModal").style.display = "none");
+  $("fotoModal").addEventListener("click", (e) => { if (e.target.id === "fotoModal") $("fotoModal").style.display = "none"; });
   ["obsFEstado", "obsFEsp"].forEach(id => $(id).addEventListener("change", renderObs));
   $("obsBuscar").addEventListener("input", renderObs);
   $("obsTabla").addEventListener("click", async (e) => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.oe) abrirObs(OBS.find(o => o.id === b.dataset.oe));
+    if (b.dataset.of) verFotos(OBS.find(o => o.id === b.dataset.of));
     if (b.dataset.od && confirm("¿Borrar esta observación?")) {
       const { error } = await supabaseClient.from("pv_observaciones").delete().eq("id", b.dataset.od);
       if (error) alert(error.message); else await cargar();
