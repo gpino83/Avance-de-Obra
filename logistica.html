@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logística</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  .in { padding:7px 10px; border-radius:8px; border:1px solid var(--border); font:inherit; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
+  .bar .btn, .field .btn { width:auto; }
+  .grid-f { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0 14px; }
+  .full { grid-column:1/-1; }
+  .back { color:var(--blue); text-decoration:none; font-size:12.5px; margin-right:6px; }
+  .mini { width:auto !important; padding:3px 8px; font-size:11.5px; }
+  .bar-h { height:10px; border-radius:5px; background:#e9e8e2; overflow:hidden; min-width:90px; }
+  .bar-h > i { display:block; height:100%; background:var(--blue); }
+  .num { text-align:right; white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1><a class="back" href="modulos.html?elegir" id="backLink" style="display:none;">← Módulos</a>Logística</h1>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="who">Hola, <b id="userName">...</b> <span id="userRole"></span></span>
+    <button class="logout-btn" id="logoutBtn">Salir</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-view="tablero">Tablero</button>
+  <button class="tab-btn" data-view="paquetes">Procura y Subcontratas</button>
+</nav>
+
+<main class="content">
+  <div class="card">
+    <label style="font-size:12.5px; color:var(--text-secondary);">Proyecto</label><br>
+    <select id="lgProyecto" class="in" style="margin-top:6px;"></select>
+  </div>
+
+  <!-- ============ TABLERO ============ -->
+  <section class="view active" id="view-tablero">
+    <div class="stat-row" id="lgStats"></div>
+    <div class="card">
+      <h2>Alertas: qué hay que pedir o cerrar</h2>
+      <p class="save-hint">Fecha límite = fecha necesaria menos el plazo de entrega o contratación. Se muestran los paquetes aún sin adjudicar que vencen en los próximos 14 días o ya vencieron, y los que llegarían después de la fecha necesaria.</p>
+      <div style="overflow-x:auto;"><table class="data-table" id="lgTabAlertas"><thead><tr><th>N°</th><th>Tipo</th><th>Paquete</th><th>Frente</th><th>Estado</th><th>Necesario</th><th>Fecha límite</th><th>Alerta</th><th>Responsable</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Comprometido vs. presupuesto por frente</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="lgTabFrente"><thead><tr><th>Frente</th><th class="num">Paquetes</th><th class="num">Presupuesto ref. (S/)</th><th class="num">Comprometido (S/)</th><th class="num">Diferencia (S/)</th><th>Cerrados</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Paquetes por estado</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="lgTabEstado"><thead><tr><th>Estado</th><th class="num">Materiales</th><th class="num">Subcontratas</th><th class="num">Total</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ PAQUETES ============ -->
+  <section class="view" id="view-paquetes">
+    <form class="card" id="pkForm" style="display:none;">
+      <h2 id="pkFormTitulo">Nuevo paquete</h2>
+      <div class="grid-f">
+        <div class="field"><label>Tipo</label><select id="pfTipo" class="in"><option>Material</option><option>Subcontrata</option></select></div>
+        <div class="field full"><label>Nombre (material o paquete de subcontrata)</label><input type="text" id="pfNombre" class="in" required></div>
+        <div class="field"><label>Frente</label><select id="pfFrente" class="in"></select></div>
+        <div class="field"><label>Partida ligada (opcional)</label><select id="pfPartida" class="in"></select></div>
+        <div class="field"><label>Responsable</label><input type="text" id="pfResp" class="in" list="lgRespList"><datalist id="lgRespList"></datalist></div>
+        <div class="field"><label>Estado</label><select id="pfEstado" class="in"></select></div>
+        <div class="field"><label>Presupuesto de referencia (S/)</label><input type="number" id="pfPpto" class="in" step="0.01" min="0"></div>
+        <div class="field"><label>Plazo de entrega / contratación (días)</label><input type="number" id="pfPlazo" class="in" step="1" min="0"></div>
+        <div class="field"><label>Fecha de requerimiento</label><input type="date" id="pfFReq" class="in"></div>
+        <div class="field"><label>Fecha necesaria en obra</label><input type="date" id="pfFNec" class="in"></div>
+        <div class="field"><label>Fecha de adjudicación</label><input type="date" id="pfFAdj" class="in"></div>
+        <div class="field"><label>Entrega prevista</label><input type="date" id="pfFPrev" class="in"></div>
+        <div class="field"><label>Fecha de cierre / entrega real</label><input type="date" id="pfFCierre" class="in"></div>
+        <div class="field"><label>Proveedor adjudicado</label><input type="text" id="pfProv" class="in"></div>
+        <div class="field"><label>Monto comprometido (S/)</label><input type="number" id="pfMonto" class="in" step="0.01" min="0"></div>
+        <div class="field full"><label>Observaciones</label><input type="text" id="pfObs" class="in"></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="pkCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="pkMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+
+    <div class="card">
+      <h2>Paquetes de procura y subcontratas</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="pkNuevo">+ Nuevo paquete</button>
+        <select id="pkFTipo" class="in"><option value="">Materiales y subcontratas</option><option>Material</option><option>Subcontrata</option></select>
+        <select id="pkFEstado" class="in"></select>
+        <select id="pkFFrente" class="in" style="max-width:260px;"></select>
+        <input type="text" id="pkBuscar" class="in" placeholder="Buscar..." style="flex:1; min-width:160px;">
+        <button class="btn secondary" type="button" id="pkCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="pkTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Paquete</th><th>Frente</th><th>Estado</th><th class="num">Presupuesto ref.</th><th class="num">Comprometido</th><th>Proveedor</th><th>Necesario</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card" id="cotCard" style="display:none;">
+      <h2 id="cotTitulo">Cuadro comparativo</h2>
+      <p class="save-hint" id="cotRef"></p>
+      <div style="overflow-x:auto;"><table class="data-table" id="cotTabla"><thead><tr><th>Proveedor</th><th class="num">Monto (S/)</th><th class="num">vs. presupuesto</th><th class="num">Plazo (días)</th><th>Condiciones</th><th></th></tr></thead><tbody></tbody></table></div>
+      <form id="cotForm" class="bar" style="margin-top:12px;">
+        <input type="text" id="cfProv" class="in" placeholder="Proveedor" required>
+        <input type="number" id="cfMonto" class="in" placeholder="Monto (S/)" step="0.01" min="0" required style="width:140px;">
+        <input type="number" id="cfPlazo" class="in" placeholder="Plazo (días)" step="1" min="0" style="width:120px;">
+        <input type="text" id="cfCond" class="in" placeholder="Condiciones de pago, garantía..." style="flex:1; min-width:180px;">
+        <button type="submit" class="btn">Agregar oferta</button>
+        <button type="button" class="btn secondary" id="cotCerrar">Cerrar</button>
+      </form>
+      <div id="cotMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </div>
+  </section>
+</main>
+
+<script src="js/supabase-config.js"></script>
+<script src="js/logistica.js"></script>
+</body>
+</html>
