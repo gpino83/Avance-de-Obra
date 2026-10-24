@@ -248,7 +248,7 @@
   const TH = (cols) => cols.map(c => `<th${c[1] ? ` class="num"` : ""}>${c[0]}</th>`).join("");
 
   registerVista({
-    id: "valorizacion", titulo: "Valorización",
+    id: "valorizacion", titulo: "Valorización de cliente",
     html: `<div class="card"><h2>Valorización mensual al cliente</h2>
       <p class="save-hint" id="valNota"></p>
       <div class="stat-row" id="valTiles"></div>
