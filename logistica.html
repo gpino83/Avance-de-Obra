@@ -33,7 +33,7 @@
   <button class="tab-btn active" data-view="tablero">Tablero</button>
   <button class="tab-btn" data-view="paquetes">Procura y Subcontratas</button>
   <button class="tab-btn" data-view="almacen">Almacén</button>
-  <button class="tab-btn" data-view="subvals">Valorizaciones de subcontratas</button>
+  <button class="tab-btn" data-view="pagos">Estado de pagos</button>
 </nav>
 
 <main class="content">
@@ -174,47 +174,31 @@
     </div>
   </section>
 
-  <!-- ============ VALORIZACIONES DE SUBCONTRATAS ============ -->
-  <section class="view" id="view-subvals">
+  <!-- ============ ESTADO DE PAGOS ============ -->
+  <section class="view" id="view-pagos">
+    <div class="stat-row" id="pgStats"></div>
     <div class="card">
-      <h2>Estado de cuenta por subcontrata</h2>
-      <p class="save-hint">Aparecen los paquetes de tipo Subcontrata ya adjudicados. Contrato = monto comprometido del paquete. Neto = valorización − adelanto amortizado − retención − otros descuentos.</p>
-      <div style="overflow-x:auto;"><table class="data-table" id="svResumen"><thead><tr><th>N°</th><th>Subcontrata</th><th>Proveedor</th><th class="num">Contrato (S/)</th><th class="num">Valorizado (S/)</th><th class="num">% avance</th><th class="num">Saldo (S/)</th><th class="num">Retenido (S/)</th><th class="num">Pagado neto (S/)</th><th class="num">Por pagar (S/)</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
-    </div>
-
-    <div class="card" id="svCard" style="display:none;">
-      <h2 id="svTitulo"></h2>
-      <p class="save-hint" id="svRef"></p>
-      <div style="overflow-x:auto;"><table class="data-table" id="svTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Periodo</th><th>Descripción</th><th class="num">Bruto</th><th class="num">(−) Adelanto</th><th class="num">(−) Retención</th><th class="num">(−) Otros</th><th class="num">Neto</th><th class="num">IGV 18 %</th><th class="num">Total</th><th>Estado</th><th>Factura</th><th>Pago</th><th></th></tr></thead><tbody></tbody></table></div>
-      <form id="svForm" style="margin-top:14px; display:none;">
-        <h3 id="svFormTitulo" style="font-size:14px; margin:0 0 8px;">Nueva valorización</h3>
-        <div class="grid-f">
-          <div class="field"><label>Tipo</label><select id="svTipo" class="in"><option>Valorización</option><option>Liberación de retención</option></select></div>
-          <div class="field"><label>Periodo</label><input type="month" id="svPeriodo" class="in"></div>
-          <div class="field full"><label>Descripción / partidas valorizadas</label><input type="text" id="svDesc" class="in"></div>
-          <div class="field"><label id="svBrutoL">Monto bruto valorizado (S/)</label><input type="number" id="svBruto" class="in" step="0.01" min="0" required></div>
-          <div class="field sv-desc"><label>Adelanto amortizado (S/)</label><input type="number" id="svAmort" class="in" step="0.01" min="0"></div>
-          <div class="field sv-desc"><label>Retención / fondo de garantía (S/)</label><input type="number" id="svRet" class="in" step="0.01" min="0"></div>
-          <div class="field sv-desc"><label>Otros descuentos (S/)</label><input type="number" id="svOtros" class="in" step="0.01" min="0"></div>
-          <div class="field"><label>Estado</label><select id="svEstado" class="in"><option>Presentada</option><option>Aprobada</option><option>Pagada</option></select></div>
-          <div class="field"><label>N° de factura</label><input type="text" id="svFactura" class="in"></div>
-          <div class="field"><label>Fecha de presentación</label><input type="date" id="svFPres" class="in"></div>
-          <div class="field"><label>Fecha de pago</label><input type="date" id="svFPago" class="in"></div>
-          <div class="field full"><label>Observaciones</label><input type="text" id="svObs" class="in"></div>
-        </div>
-        <p id="svNeto" style="font-size:13px; font-weight:600; margin:6px 0;"></p>
-        <div style="display:flex; gap:8px;">
-          <button type="submit" class="btn">Guardar</button>
-          <button type="button" class="btn secondary" id="svCancelar">Cancelar</button>
-        </div>
-        <div id="svMsg" style="color:var(--red); font-size:12.5px;"></div>
-      </form>
-      <div class="bar" style="margin-top:12px;">
-        <button class="btn" type="button" id="svNueva">+ Nueva valorización</button>
-        <button class="btn secondary" type="button" id="svCerrarSub" style="display:none;">Cerrar subcontrata</button>
-        <button class="btn secondary" type="button" id="svCSV">Exportar (CSV)</button>
-        <button class="btn secondary" type="button" id="svCerrar">Cerrar panel</button>
+      <h2>Estado de pagos por paquete</h2>
+      <p class="save-hint">Materiales: se registran aquí las facturas y sus pagos. Subcontratas: los datos vienen de las valorizaciones registradas en Control de Obra (Costos &gt; Subcontratas), solo lectura. Comprometido va sin IGV; facturado y pagado incluyen IGV (18 %).</p>
+      <div class="bar">
+        <select id="pgFTipo" class="in"><option value="">Materiales y subcontratas</option><option>Material</option><option>Subcontrata</option></select>
+        <button class="btn secondary" type="button" id="pgCSV">Exportar (CSV)</button>
       </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="pgTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Paquete</th><th>Proveedor</th><th class="num">Comprometido (S/)</th><th class="num">Facturado (S/)</th><th class="num">Pagado (S/)</th><th class="num">Por pagar (S/)</th><th class="num">Sin facturar (S/)</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card" id="pgCard" style="display:none;">
+      <h2 id="pgTitulo"></h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="pgDet"><thead><tr><th>Factura</th><th>Fecha</th><th class="num">Monto (S/)</th><th>Vencimiento</th><th>Estado</th><th>Fecha de pago</th><th>Obs.</th><th></th></tr></thead><tbody></tbody></table></div>
+      <form id="pgForm" class="bar" style="margin-top:12px;">
+        <input type="text" id="pfFact" class="in" placeholder="N° de factura" style="width:140px;">
+        <input type="date" id="pfFFact" class="in" title="Fecha de factura">
+        <input type="number" id="pfMontoF" class="in" placeholder="Monto total (S/)" step="0.01" min="0" required style="width:150px;">
+        <input type="date" id="pfFVenc" class="in" title="Vencimiento">
+        <input type="text" id="pfObsF" class="in" placeholder="Observaciones" style="flex:1; min-width:140px;">
+        <button type="submit" class="btn">Agregar factura</button>
+        <button type="button" class="btn secondary" id="pgCerrar">Cerrar</button>
+      </form>
+      <div id="pgMsg" style="color:var(--red); font-size:12.5px;"></div>
     </div>
   </section>
 </main>
