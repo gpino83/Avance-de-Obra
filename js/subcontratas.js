@@ -1,6 +1,6 @@
 // =========================================================
 // Control de Obra > Costos > Subcontratas: valorizaciones de subcontratistas.
-// Los contratos (paquetes de tipo Subcontrata) se adjudican en Logística; aquí se miden y valorizan.
+// Los contratos (paquetes de tipo Subcontrata) se adjudican en Procura; aquí se miden y valorizan.
 // Se carga DESPUÉS de costos.js.
 // =========================================================
 (function () {
@@ -56,7 +56,7 @@
       else if (p.estado === "Cerrado") al = r.ret > 0.5 ? `<span class="badge warn">Retención por devolver</span>` : `<span class="badge ok">Cerrada</span>`;
       else if (agotado(r)) al = `<span class="badge warn">Listo para cerrar</span>`;
       return `<tr><td>${p.numero}</td><td>${esc(p.nombre)}</td><td>${esc(p.proveedor)}</td><td class="num">${solesFmt(r.contrato)}</td><td class="num">${solesFmt(r.bruto)}</td><td class="num">${r.pct.toFixed(1)} %</td><td class="num">${solesFmt(r.saldo)}</td><td class="num">${solesFmt(r.ret)}</td><td class="num">${solesFmt(r.pagado)}</td><td class="num">${solesFmt(r.porPagar)}</td><td>${al}</td><td><button class="btn secondary" style="${mini}" data-sc="${p.id}">Valorizaciones (${r.vs.length})</button></td></tr>`;
-    }).join("") || `<tr><td colspan="12" style="color:var(--text-muted);">No hay subcontratas adjudicadas. Se adjudican en el módulo Logística (paquete de tipo Subcontrata).</td></tr>`;
+    }).join("") || `<tr><td colspan="12" style="color:var(--text-muted);">No hay subcontratas adjudicadas. Se adjudican en el módulo Procura (paquete de tipo Subcontrata).</td></tr>`;
   }
 
   function abrir(id) {
@@ -154,7 +154,7 @@
     id: "subcontratas", titulo: "Subcontratas",
     html: `<div class="stat-row" id="scTiles"></div>
       <div class="card"><h2>Estado de cuenta por subcontrata</h2>
-        <p class="save-hint">Los contratos se adjudican en Logística. Aquí se valoriza el avance de cada subcontratista. Neto = valorización − adelanto amortizado − retención − otros descuentos.</p>
+        <p class="save-hint">Los contratos se adjudican en Procura. Aquí se valoriza el avance de cada subcontratista. Neto = valorización − adelanto amortizado − retención − otros descuentos.</p>
         <div style="overflow-x:auto;"><table class="data-table" id="scResumen"><thead><tr><th>N°</th><th>Subcontrata</th><th>Proveedor</th><th class="num">Contrato (S/)</th><th class="num">Valorizado (S/)</th><th class="num">% avance</th><th class="num">Saldo (S/)</th><th class="num">Retenido (S/)</th><th class="num">Pagado neto (S/)</th><th class="num">Por pagar (S/)</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div></div>
       <div class="card" id="scCard" style="display:none;">
         <h2 id="scTitulo"></h2><p class="save-hint" id="scRef"></p>

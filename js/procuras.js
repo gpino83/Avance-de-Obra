@@ -1,6 +1,6 @@
 // =========================================================
 // Control de Obra > Costos > Procuras: facturas y pagos de materiales.
-// Los paquetes se adjudican en Logística; aquí se registra lo facturado y pagado.
+// Los paquetes se adjudican en Procura; aquí se registra lo facturado y pagado.
 // Se carga DESPUÉS de subcontratas.js.
 // =========================================================
 (function () {
@@ -50,7 +50,7 @@
       const r = resumen(p);
       const al = r.venc ? `<span class="badge late">${r.venc} vencida(s)</span>` : (r.sin < -1 ? `<span class="badge warn">Facturado sobre lo comprometido</span>` : "");
       return `<tr><td>${p.numero}</td><td>${esc(p.nombre)}</td><td>${esc(p.proveedor)}</td><td class="num">${solesFmt(r.comp)}</td><td class="num">${solesFmt(r.fact)}</td><td class="num">${solesFmt(r.pag)}</td><td class="num" style="font-weight:600;">${solesFmt(r.por)}</td><td class="num">${solesFmt(Math.max(0, r.sin))}</td><td>${al}</td><td><button class="btn secondary" style="${mini}" data-pr="${p.id}">Facturas (${r.n})</button></td></tr>`;
-    }).join("") || `<tr><td colspan="10" style="color:var(--text-muted);">No hay procuras adjudicadas. Se adjudican en el módulo Logística (paquete de tipo Material).</td></tr>`;
+    }).join("") || `<tr><td colspan="10" style="color:var(--text-muted);">No hay procuras adjudicadas. Se adjudican en el módulo Procura (paquete de tipo Material).</td></tr>`;
   }
 
   function abrir(id) {
@@ -83,7 +83,7 @@
     id: "procuras", titulo: "Procuras",
     html: `<div class="stat-row" id="prTiles"></div>
       <div class="card"><h2>Facturas y pagos de materiales</h2>
-        <p class="save-hint">Los paquetes se adjudican en Logística. Aquí se registra lo facturado y pagado a cada proveedor. Comprometido va sin IGV; facturado y pagado incluyen IGV (18 %).</p>
+        <p class="save-hint">Los paquetes se adjudican en Procura. Aquí se registra lo facturado y pagado a cada proveedor. Comprometido va sin IGV; facturado y pagado incluyen IGV (18 %).</p>
         <div style="overflow-x:auto;"><table class="data-table" id="prResumen"><thead><tr><th>N°</th><th>Material</th><th>Proveedor</th><th class="num">Comprometido (S/)</th><th class="num">Facturado (S/)</th><th class="num">Pagado (S/)</th><th class="num">Por pagar (S/)</th><th class="num">Sin facturar (S/)</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
         <div style="margin-top:10px;"><button class="btn secondary" type="button" id="prCSV" style="width:auto;">Exportar (CSV)</button></div></div>
       <div class="card" id="prCard" style="display:none;">

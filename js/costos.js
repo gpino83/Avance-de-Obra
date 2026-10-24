@@ -161,12 +161,12 @@
     const ahorro = pref - comp;
     const adicNeto = adicionalNeto();
     const tile = (l, v, c) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${c || ""}" style="font-size:19px;">${v}</div></div>`;
-    $("cosAviso").textContent = LG_OK ? "El comprometido sale de los paquetes adjudicados en el módulo Logística." : "No se pudo leer Logística: tu usuario no tiene acceso o falta correr logistica.sql. Se muestran solo presupuesto y adicionales.";
+    $("cosAviso").textContent = LG_OK ? "El comprometido sale de los paquetes adjudicados en el módulo Procura." : "No se pudo leer Procura: tu usuario no tiene acceso o falta correr logistica.sql. Se muestran solo presupuesto y adicionales.";
     $("cosTiles").innerHTML =
       tile("Presupuesto directo contractual", "S/ " + solesFmt(directo)) +
       tile("Adicionales y deductivos aprobados", (adicNeto >= 0 ? "+ " : "− ") + "S/ " + solesFmt(Math.abs(adicNeto))) +
       tile("Presupuesto vigente", "S/ " + solesFmt(directo + adicNeto)) +
-      tile("Comprometido en Logística", "S/ " + solesFmt(comp)) +
+      tile("Comprometido en Procura", "S/ " + solesFmt(comp)) +
       tile("Ahorro / sobrecosto adjudicado", (ahorro >= 0 ? "+ " : "− ") + "S/ " + solesFmt(Math.abs(ahorro)), ahorro >= 0 ? "good" : "bad") +
       tile("% del presupuesto adjudicado", directo ? (pref / directo * 100).toFixed(1) + " %" : "—");
     const frentes = [...new Set(PARTIDAS.map(x => x.frente))];
