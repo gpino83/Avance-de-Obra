@@ -45,10 +45,11 @@
   const LG = { href: "logistica.html", ico: "📦", bg: "#fdf1e4", titulo: "Procura", txt: "Compra de materiales y contratación de subcontratas, cuadros comparativos, almacén y alertas por cronograma." };
   const CAL = { href: "calidad.html", ico: "✅", bg: "#efe9fb", titulo: "Calidad", txt: "Protocolos de inspección, no conformidades, pruebas y ensayos, con tablero de indicadores." };
   const modulos = [];
-  if (!["postventa", "logistica", "calidad"].includes(rol)) modulos.push(OBRA);
+  if (!["postventa", "logistica", "calidad", "ssoma"].includes(rol)) modulos.push(OBRA);
   if (["admin", "planner", "logistica", "viewer"].includes(rol)) modulos.push(LG);
   if (["admin", "planner", "residente", "calidad", "viewer"].includes(rol)) modulos.push(CAL);
-  // (aquí irá SSOMA)
+  const SS = { href: "ssoma.html", ico: "🦺", bg: "#fdebe3", titulo: "SSOMA", txt: "Inspecciones, charlas, incidentes, permisos de trabajo, EPP, medio ambiente e índices de seguridad." };
+  if (["admin", "planner", "residente", "ssoma", "viewer"].includes(rol)) modulos.push(SS);
   if (["admin", "planner", "postventa", "viewer"].includes(rol)) modulos.push(PV);
 
   // Un solo módulo disponible: entra directo
