@@ -79,8 +79,8 @@
     const id = SEL.id; $("prForm").reset(); await cargar(true); renderResumen(); abrir(id);
   }
 
-  registerVista({
-    id: "procuras", titulo: "Procuras",
+  (window.PAGOS_PARTES = window.PAGOS_PARTES || []).push({
+    k: "proc",
     html: `<div class="stat-row" id="prTiles"></div>
       <div class="card"><h2>Facturas y pagos de materiales</h2>
         <p class="save-hint">Los paquetes se adjudican en Procura. Aquí se registra lo facturado y pagado a cada proveedor. Comprometido va sin IGV; facturado y pagado incluyen IGV (18 %).</p>

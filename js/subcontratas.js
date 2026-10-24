@@ -150,8 +150,8 @@
     const id = SEL.id; await cargar(true); renderResumen(); abrir(id);
   }
 
-  registerVista({
-    id: "subcontratas", titulo: "Subcontratas",
+  (window.PAGOS_PARTES = window.PAGOS_PARTES || []).push({
+    k: "sub",
     html: `<div class="stat-row" id="scTiles"></div>
       <div class="card"><h2>Estado de cuenta por subcontrata</h2>
         <p class="save-hint">Los contratos se adjudican en Procura. Aquí se valoriza el avance de cada subcontratista. Neto = valorización − adelanto amortizado − retención − otros descuentos.</p>
