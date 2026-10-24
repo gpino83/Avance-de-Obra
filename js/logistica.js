@@ -2,7 +2,8 @@
 // Módulo Logística: procura de materiales y cierres de subcontratas
 // =========================================================
 let U = null, PERFIL = null, PROYECTOS = [], PID = null;
-let PARTIDAS = [], PAQ = [], COT = [];
+let PARTIDAS = [], PAQ = [], COT = [], MOV = [], SVALS = [];
+let SV_PAQ = null, SV_EDIT = null;
 let EDIT = null, COT_PAQ = null;
 
 const ESTADOS = ["Por solicitar", "En cotización", "Adjudicado", "Orden / Contrato", "Cerrado", "Anulado"];
@@ -70,6 +71,8 @@ async function cargar() {
     fetchAll(() => supabaseClient.from("lg_paquetes").select("*").eq("proyecto_id", PID).order("numero")),
   ]);
   PARTIDAS = pa; PAQ = pk;
+  MOV = await fetchAll(() => supabaseClient.from("lg_alm_mov").select("*").eq("proyecto_id", PID).order("fecha", { ascending: false }).order("created_at", { ascending: false }));
+  SVALS = await fetchAll(() => supabaseClient.from("lg_sub_vals").select("*").eq("proyecto_id", PID).order("numero"));
   const ids = PAQ.map(p => p.id);
   COT = [];
   for (let i = 0; i < ids.length; i += 100) {
@@ -77,9 +80,11 @@ async function cargar() {
     COT = COT.concat(data || []);
   }
   COT_PAQ = null; $("cotCard").style.display = "none";
-  [renderTablero, renderPaquetes].forEach(fn => { try { fn(); } catch (e) { console.error(fn.name, e); } });
+  SV_PAQ = null; $("svCard").style.display = "none";
+  [renderTablero, renderPaquetes, renderAlmacen, renderSubResumen].forEach(fn => { try { fn(); } catch (e) { console.error(fn.name, e); } });
 }
 
+const cantTxt = (p) => p.cantidad != null && p.cantidad !== "" ? `${Number(p.cantidad).toLocaleString("es-PE", { maximumFractionDigits: 2 })} ${esc(p.unidad || "")}` : (p.unidad ? esc(p.unidad) : "");
 const frentes = () => [...new Set(PARTIDAS.map(p => p.frente))];
 const partidaPorId = (id) => PARTIDAS.find(p => p.id === id);
 
@@ -163,8 +168,12 @@ function renderPaquetes() {
   $("pkTabla").querySelector("tbody").innerHTML = paqFiltrados().map(p => {
     const a = alertaDe(p);
     const cls = p.estado === "Cerrado" ? "ok" : p.estado === "Anulado" ? "" : ABIERTOS.includes(p.estado) ? "late" : "warn";
-    return `<tr><td>${p.numero}</td><td>${p.tipo}</td><td style="min-width:200px;">${esc(p.nombre)}</td><td>${esc(p.frente)}</td><td><span class="badge ${cls}">${p.estado}</span></td><td class="num">${soles(p.presupuesto_ref)}</td><td class="num">${soles(p.monto_comprometido)}</td><td>${esc(p.proveedor)}</td><td>${fd(p.fecha_necesaria)}</td><td>${a.nivel ? `<span class="badge ${a.nivel}">${a.texto}</span>` : ""}</td><td style="white-space:nowrap;"><button class="btn secondary mini" data-cot="${p.id}">Ofertas (${nCot(p.id)})</button> ${puedeEditar() ? `<button class="btn secondary mini" data-ed="${p.id}">Editar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-del="${p.id}">Borrar</button>` : ""}</td></tr>`;
-  }).join("") || `<tr><td colspan="11" style="color:var(--text-muted);">No hay paquetes con este filtro.</td></tr>`;
+    return `<tr><td>${p.numero}</td><td>${p.tipo}</td><td style="min-width:200px;">${esc(p.nombre)}</td><td>${esc(p.frente)}</td><td class="num">${cantTxt(p)}</td><td><span class="badge ${cls}">${p.estado}</span></td><td class="num">${soles(p.presupuesto_ref)}</td><td class="num">${soles(p.monto_comprometido)}</td><td>${esc(p.proveedor)}</td><td>${fd(p.fecha_necesaria)}</td><td>${a.nivel ? `<span class="badge ${a.nivel}">${a.texto}</span>` : ""}</td><td style="white-space:nowrap;"><button class="btn secondary mini" data-cot="${p.id}">Ofertas (${nCot(p.id)})</button> ${puedeEditar() ? `<button class="btn secondary mini" data-ed="${p.id}">Editar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-del="${p.id}">Borrar</button>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="12" style="color:var(--text-muted);">No hay paquetes con este filtro.</td></tr>`;
+}
+
+function alternarSub() {
+  document.querySelectorAll(".sub-only").forEach(e => e.style.display = $("pfTipo").value === "Subcontrata" ? "" : "none");
 }
 
 function llenarPartidas(frente, sel) {
@@ -183,6 +192,11 @@ function abrir(p) {
   llenarPartidas($("pfFrente").value, p && p.partida_id);
   $("pfResp").value = p ? (p.responsable || "") : "";
   $("pfEstado").value = p ? p.estado : "Por solicitar";
+  $("pfUnd").value = p ? (p.unidad || "") : "";
+  $("pfCant").value = p && p.cantidad != null ? p.cantidad : "";
+  $("pfAdel").value = p ? (p.adelanto_pct ?? 0) : 0;
+  $("pfRet").value = p ? (p.retencion_pct ?? 5) : 5;
+  alternarSub();
   $("pfPpto").value = p && p.presupuesto_ref != null ? p.presupuesto_ref : "";
   $("pfPlazo").value = p && p.plazo_dias != null ? p.plazo_dias : "";
   $("pfFReq").value = p ? (p.fecha_requerimiento || "") : hoyISO();
@@ -204,6 +218,7 @@ async function guardar(e) {
   const fila = {
     proyecto_id: PID, tipo: $("pfTipo").value, nombre: $("pfNombre").value.trim(), frente: txt("pfFrente"),
     partida_id: $("pfPartida").value || null, responsable: txt("pfResp"), estado,
+    unidad: txt("pfUnd"), cantidad: num("pfCant"), adelanto_pct: num("pfAdel") ?? 0, retencion_pct: num("pfRet") ?? 5,
     presupuesto_ref: num("pfPpto"), plazo_dias: num("pfPlazo"), fecha_requerimiento: txt("pfFReq"), fecha_necesaria: txt("pfFNec"),
     fecha_adjudicacion: txt("pfFAdj") || (["Adjudicado", "Orden / Contrato", "Cerrado"].includes(estado) ? hoyISO() : null),
     fecha_entrega_prevista: txt("pfFPrev"), fecha_cierre: txt("pfFCierre") || (estado === "Cerrado" ? hoyISO() : null),
@@ -236,8 +251,8 @@ function renderCot() {
   $("cotTabla").querySelector("tbody").innerHTML = l.map((c, i) => {
     const d = ref ? (c.monto - ref) / ref * 100 : null;
     const sel = c.seleccionada;
-    return `<tr${sel ? ' style="background:#eaf6ee;"' : ""}><td>${esc(c.proveedor)}${i === 0 ? ' <span class="badge ok">Menor oferta</span>' : ""}${sel ? ' <span class="badge ok">Adjudicada</span>' : ""}</td><td class="num">${soles(c.monto)}</td><td class="num" style="color:${d > 0 ? "var(--red)" : "var(--green)"};">${d == null ? "" : (d > 0 ? "+" : "") + d.toFixed(1) + " %"}</td><td class="num">${c.plazo_dias ?? ""}</td><td>${esc(c.condiciones)}</td><td style="white-space:nowrap;">${puedeEditar() && !sel ? `<button class="btn secondary mini" data-adj="${c.id}">Adjudicar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-cdel="${c.id}">Borrar</button>` : ""}</td></tr>`;
-  }).join("") || `<tr><td colspan="6" style="color:var(--text-muted);">Aún no hay ofertas registradas.</td></tr>`;
+    return `<tr${sel ? ' style="background:#eaf6ee;"' : ""}><td>${esc(c.proveedor)}${i === 0 ? ' <span class="badge ok">Menor oferta</span>' : ""}${sel ? ' <span class="badge ok">Adjudicada</span>' : ""}</td><td class="num">${soles(c.monto)}</td><td class="num">${COT_PAQ.cantidad > 0 ? (c.monto / COT_PAQ.cantidad).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td><td class="num" style="color:${d > 0 ? "var(--red)" : "var(--green)"};">${d == null ? "" : (d > 0 ? "+" : "") + d.toFixed(1) + " %"}</td><td class="num">${c.plazo_dias ?? ""}</td><td>${esc(c.condiciones)}</td><td style="white-space:nowrap;">${puedeEditar() && !sel ? `<button class="btn secondary mini" data-adj="${c.id}">Adjudicar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-cdel="${c.id}">Borrar</button>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="7" style="color:var(--text-muted);">Aún no hay ofertas registradas.</td></tr>`;
 }
 
 async function agregarCot(e) {
@@ -282,6 +297,8 @@ function enlazarEventos() {
   $("pkCancelar").addEventListener("click", () => $("pkForm").style.display = "none");
   $("pkForm").addEventListener("submit", guardar);
   $("pfFrente").addEventListener("change", () => llenarPartidas($("pfFrente").value));
+  $("pfTipo").addEventListener("change", alternarSub);
+  enlazarEventosExtra();
   $("pfPartida").addEventListener("change", () => {
     const p = partidaPorId($("pfPartida").value);
     if (!p) return;
@@ -312,6 +329,302 @@ function enlazarEventos() {
     }
   });
   $("pkCSV").addEventListener("click", () => descargarCSV("logistica_paquetes.csv",
-    ["N°", "Tipo", "Paquete", "Frente", "Responsable", "Estado", "Presupuesto ref.", "Comprometido", "Proveedor", "Plazo (d)", "Requerimiento", "Necesario", "Adjudicación", "Entrega prevista", "Cierre", "Alerta", "Observaciones"],
-    paqFiltrados().map(p => [p.numero, p.tipo, p.nombre, p.frente, p.responsable, p.estado, p.presupuesto_ref, p.monto_comprometido, p.proveedor, p.plazo_dias, fd(p.fecha_requerimiento), fd(p.fecha_necesaria), fd(p.fecha_adjudicacion), fd(p.fecha_entrega_prevista), fd(p.fecha_cierre), alertaDe(p).texto, p.observaciones])));
+    ["N°", "Tipo", "Paquete", "Cantidad", "Unidad", "Frente", "Responsable", "Estado", "Presupuesto ref.", "Comprometido", "Proveedor", "Plazo (d)", "Requerimiento", "Necesario", "Adjudicación", "Entrega prevista", "Cierre", "Alerta", "Observaciones"],
+    paqFiltrados().map(p => [p.numero, p.tipo, p.nombre, p.cantidad, p.unidad, p.frente, p.responsable, p.estado, p.presupuesto_ref, p.monto_comprometido, p.proveedor, p.plazo_dias, fd(p.fecha_requerimiento), fd(p.fecha_necesaria), fd(p.fecha_adjudicacion), fd(p.fecha_entrega_prevista), fd(p.fecha_cierre), alertaDe(p).texto, p.observaciones])));
+}
+
+
+// =========================================================
+// ALMACÉN
+// =========================================================
+const norm = (t) => String(t || "").trim().toLowerCase();
+const clave = (m) => norm(m.material) + "|" + norm(m.unidad);
+const fmt2 = (n) => Number(n).toLocaleString("es-PE", { maximumFractionDigits: 2 });
+const recibidoDe = (pid) => MOV.filter(m => m.paquete_id === pid && m.tipo === "Ingreso").reduce((s, m) => s + Number(m.cantidad), 0);
+const ESTADOS_ADJ = ["Adjudicado", "Orden / Contrato", "Cerrado"];
+
+function stockCalc() {
+  const mapa = new Map();
+  MOV.forEach(m => {
+    const k = clave(m);
+    if (!mapa.has(k)) mapa.set(k, { material: m.material.trim(), unidad: m.unidad.trim(), ing: 0, sal: 0, ultimo: m.fecha });
+    const r = mapa.get(k);
+    if (m.tipo === "Ingreso") r.ing += Number(m.cantidad); else r.sal += Number(m.cantidad);
+    if (m.fecha > r.ultimo) r.ultimo = m.fecha;
+  });
+  return [...mapa.values()].sort((a, b) => a.material.localeCompare(b.material));
+}
+const stockDe = (material, unidad) => {
+  const k = norm(material) + "|" + norm(unidad);
+  return MOV.filter(m => clave(m) === k).reduce((s, m) => s + (m.tipo === "Ingreso" ? 1 : -1) * Number(m.cantidad), 0);
+};
+
+function pendientes() {
+  return PAQ.filter(p => p.tipo === "Material" && ESTADOS_ADJ.includes(p.estado) && Number(p.cantidad) > 0)
+    .map(p => ({ p, rec: recibidoDe(p.id) })).filter(x => x.p.estado !== "Cerrado" || x.rec < Number(x.p.cantidad));
+}
+
+function renderAlmacen() {
+  const hoy = hoyISO(), mes = hoy.slice(0, 7);
+  const st = stockCalc();
+  const pend = pendientes().filter(x => x.rec < Number(x.p.cantidad) && x.p.estado !== "Cerrado");
+  const tile = (l, v, c) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${c || ""}">${v}</div></div>`;
+  const atras = pend.filter(x => x.p.fecha_entrega_prevista && x.p.fecha_entrega_prevista < hoy).length;
+  $("alStats").innerHTML =
+    tile("Materiales con stock", st.filter(r => r.ing - r.sal > 0).length) +
+    tile("Ingresos del mes", MOV.filter(m => m.tipo === "Ingreso" && m.fecha.startsWith(mes)).length) +
+    tile("Salidas del mes", MOV.filter(m => m.tipo === "Salida" && m.fecha.startsWith(mes)).length) +
+    tile("Pedidos por recibir", pend.length) +
+    tile("Entregas atrasadas", atras, atras ? "bad" : "");
+
+  const q = norm($("alBuscar").value);
+  $("alTabStock").querySelector("tbody").innerHTML = st.filter(r => !q || norm(r.material).includes(q)).map(r => {
+    const s = r.ing - r.sal;
+    return `<tr><td>${esc(r.material)}</td><td>${esc(r.unidad)}</td><td class="num">${fmt2(r.ing)}</td><td class="num">${fmt2(r.sal)}</td><td class="num" style="font-weight:600; color:${s < 0 ? "var(--red)" : "inherit"};">${fmt2(s)}</td><td>${fd(r.ultimo)}</td></tr>`;
+  }).join("") || `<tr><td colspan="6" style="color:var(--text-muted);">Aún no hay movimientos de almacén.</td></tr>`;
+
+  $("alTabPend").querySelector("tbody").innerHTML = pend.map(({ p, rec }) => {
+    const c = Number(p.cantidad), pct = Math.min(100, Math.round(rec / c * 100));
+    const tarde = p.fecha_entrega_prevista && p.fecha_entrega_prevista < hoy;
+    return `<tr><td>${p.numero}</td><td>${esc(p.nombre)}</td><td>${esc(p.proveedor)}</td><td class="num">${fmt2(c)} ${esc(p.unidad || "")}</td><td class="num">${fmt2(rec)}</td><td class="num">${fmt2(Math.max(0, c - rec))}</td><td><div class="bar-h"><i style="width:${pct}%"></i></div></td><td>${fd(p.fecha_entrega_prevista)}</td><td>${tarde ? `<span class="badge late">Atrasada ${dias(p.fecha_entrega_prevista, hoy)} d</span>` : ""}</td><td>${puedeEditar() ? `<button class="btn secondary mini" data-rec="${p.id}">Recibir</button>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="10" style="color:var(--text-muted);">No hay pedidos pendientes de recepción (los paquetes necesitan cantidad y estar adjudicados).</td></tr>`;
+
+  const ft = $("alFTipo").value;
+  $("alTabMov").querySelector("tbody").innerHTML = MOV.filter(m => !ft || m.tipo === ft).slice(0, 300).map(m =>
+    `<tr><td>${fd(m.fecha)}</td><td><span class="badge ${m.tipo === "Ingreso" ? "ok" : "warn"}">${m.tipo}</span></td><td>${esc(m.material)}</td><td>${esc(m.unidad)}</td><td class="num">${fmt2(m.cantidad)}</td><td>${esc(m.documento)}</td><td>${esc(m.contraparte)}</td><td>${esc(m.frente)}</td><td>${esc(m.observaciones)}</td><td>${puedeBorrar() ? `<button class="btn secondary mini" data-mdel="${m.id}">Borrar</button>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="10" style="color:var(--text-muted);">Sin movimientos.</td></tr>`;
+
+  $("alMatList").innerHTML = st.map(r => `<option value="${esc(r.material)}">`).join("");
+  if (!puedeEditar()) { $("alNuevoIng").style.display = "none"; $("alNuevoSal").style.display = "none"; }
+}
+
+function abrirMov(tipo, paqId) {
+  $("alForm").reset();
+  $("amTipo").value = tipo; $("amFecha").value = hoyISO();
+  ajustarMovForm();
+  $("amFrente").innerHTML = `<option value="">— sin frente —</option>` + frentes().map(f => `<option>${esc(f)}</option>`).join("");
+  $("amPaq").innerHTML = `<option value="">— sin paquete —</option>` + PAQ.filter(p => p.tipo === "Material" && ESTADOS_ADJ.includes(p.estado))
+    .map(p => `<option value="${p.id}">N° ${p.numero} — ${esc(p.nombre.slice(0, 70))}</option>`).join("");
+  if (paqId) { $("amPaq").value = paqId; alElegirPaq(); }
+  $("alMsg").textContent = "";
+  $("alForm").style.display = "";
+  $("alForm").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function ajustarMovForm() {
+  const ing = $("amTipo").value === "Ingreso";
+  $("amPaqW").style.display = ing ? "" : "none";
+  $("amFrW").style.display = ing ? "none" : "";
+  $("amDocL").textContent = ing ? "Guía de remisión / documento" : "Vale de salida";
+  $("amContL").textContent = ing ? "Proveedor" : "Retira (nombre)";
+}
+
+function alElegirPaq() {
+  const p = PAQ.find(x => x.id === $("amPaq").value);
+  if (!p) return;
+  $("amMat").value = p.nombre; $("amUnd").value = p.unidad || ""; $("amCont").value = p.proveedor || "";
+  if (Number(p.cantidad) > 0) $("amCant").value = Math.max(0, Number(p.cantidad) - recibidoDe(p.id)) || "";
+  if (p.frente) $("amFrente").value = p.frente;
+}
+
+async function guardarMov(e) {
+  e.preventDefault();
+  const tipo = $("amTipo").value, material = $("amMat").value.trim(), unidad = $("amUnd").value.trim(), cant = Number($("amCant").value);
+  if (!(cant > 0)) { $("alMsg").textContent = "La cantidad debe ser mayor que cero."; return; }
+  if (tipo === "Salida") {
+    const s = stockDe(material, unidad);
+    if (cant > s && !confirm(`Stock disponible de ${material}: ${fmt2(s)} ${unidad}. La salida lo dejaría en negativo. ¿Registrar de todos modos?`)) return;
+  }
+  const paqId = tipo === "Ingreso" ? ($("amPaq").value || null) : null;
+  const fila = {
+    proyecto_id: PID, fecha: $("amFecha").value, tipo, material, unidad, cantidad: cant, paquete_id: paqId,
+    documento: txt("amDoc"), contraparte: txt("amCont"), frente: tipo === "Salida" ? txt("amFrente") : null, observaciones: txt("amObs"),
+  };
+  const { error } = await supabaseClient.from("lg_alm_mov").insert(fila);
+  if (error) { $("alMsg").textContent = "No se pudo guardar: " + error.message; return; }
+  $("alForm").style.display = "none";
+  await cargar();
+  if (paqId) {
+    const p = PAQ.find(x => x.id === paqId);
+    if (p && Number(p.cantidad) > 0 && recibidoDe(paqId) >= Number(p.cantidad) && p.estado !== "Cerrado" &&
+        confirm(`Se completó la recepción de "${p.nombre}". ¿Marcar el paquete como Cerrado?`)) {
+      await supabaseClient.from("lg_paquetes").update({ estado: "Cerrado", fecha_cierre: hoyISO() }).eq("id", paqId);
+      await cargar();
+    }
+  }
+}
+
+// =========================================================
+// VALORIZACIONES DE SUBCONTRATAS
+// =========================================================
+const subs = () => PAQ.filter(p => p.tipo === "Subcontrata" && ESTADOS_ADJ.includes(p.estado));
+const valsDe = (pid) => SVALS.filter(v => v.paquete_id === pid).sort((a, b) => a.numero - b.numero);
+const netoDe = (v) => v.tipo === "Liberación de retención" ? Number(v.monto_bruto) : Number(v.monto_bruto) - Number(v.amort_adelanto) - Number(v.retencion) - Number(v.otros_descuentos);
+
+function resumenSub(p) {
+  const vs = valsDe(p.id), vv = vs.filter(v => v.tipo === "Valorización"), lib = vs.filter(v => v.tipo !== "Valorización");
+  const contrato = Number(p.monto_comprometido) || 0;
+  const bruto = vv.reduce((s, v) => s + Number(v.monto_bruto), 0);
+  const ret = vv.reduce((s, v) => s + Number(v.retencion), 0) - lib.reduce((s, v) => s + Number(v.monto_bruto), 0);
+  const pagado = vs.filter(v => v.estado === "Pagada").reduce((s, v) => s + netoDe(v), 0);
+  const porPagar = vs.filter(v => v.estado !== "Pagada").reduce((s, v) => s + netoDe(v), 0);
+  return { contrato, bruto, saldo: contrato - bruto, pct: contrato ? bruto / contrato * 100 : 0, ret, pagado, porPagar, vs };
+}
+
+function renderSubResumen() {
+  $("svResumen").querySelector("tbody").innerHTML = subs().map(p => {
+    const r = resumenSub(p);
+    let al = "";
+    if (r.saldo < -0.5) al = `<span class="badge late">Excede el contrato en S/ ${soles(-r.saldo)}</span>`;
+    else if (p.estado === "Cerrado") al = r.ret > 0.5 ? `<span class="badge warn">Retención por devolver</span>` : `<span class="badge ok">Cerrada</span>`;
+    else if (contratoAgotado(r)) al = `<span class="badge warn">Listo para cerrar</span>`;
+    return `<tr><td>${p.numero}</td><td>${esc(p.nombre)}</td><td>${esc(p.proveedor)}</td><td class="num">${soles(r.contrato)}</td><td class="num">${soles(r.bruto)}</td><td class="num">${r.pct.toFixed(1)} %</td><td class="num">${soles(r.saldo)}</td><td class="num">${soles(r.ret)}</td><td class="num">${soles(r.pagado)}</td><td class="num">${soles(r.porPagar)}</td><td>${al}</td><td><button class="btn secondary mini" data-sv="${p.id}">Valorizaciones (${r.vs.length})</button></td></tr>`;
+  }).join("") || `<tr><td colspan="12" style="color:var(--text-muted);">No hay subcontratas adjudicadas. Adjudica un paquete de tipo Subcontrata en la pestaña Procura y Subcontratas.</td></tr>`;
+}
+const contratoAgotado = (r) => r.contrato > 0 && r.bruto >= r.contrato * 0.995 && r.porPagar < 0.5;
+
+function abrirSub(id) {
+  SV_PAQ = PAQ.find(p => p.id === id);
+  if (!SV_PAQ) return;
+  $("svCard").style.display = "";
+  $("svForm").style.display = "none";
+  $("svTitulo").textContent = `Valorizaciones — N° ${SV_PAQ.numero} ${SV_PAQ.nombre}`;
+  renderSub();
+  $("svCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderSub() {
+  if (!SV_PAQ) return;
+  SV_PAQ = PAQ.find(p => p.id === SV_PAQ.id) || SV_PAQ;
+  const r = resumenSub(SV_PAQ);
+  $("svRef").textContent = `Proveedor: ${SV_PAQ.proveedor || "—"} · Contrato S/ ${soles(r.contrato)} · Adelanto ${SV_PAQ.adelanto_pct ?? 0} % · Retención ${SV_PAQ.retencion_pct ?? 5} % · Saldo por valorizar S/ ${soles(r.saldo)}`;
+  $("svTabla").querySelector("tbody").innerHTML = r.vs.map(v => {
+    const n = netoDe(v), igv = v.tipo === "Valorización" ? n * 0.18 : 0;
+    const lib = v.tipo !== "Valorización";
+    return `<tr><td>${v.numero}</td><td>${lib ? "Liberación de retención" : "Valorización"}</td><td>${esc(v.periodo)}</td><td>${esc(v.descripcion)}</td><td class="num">${soles(v.monto_bruto)}</td><td class="num">${lib ? "" : soles(v.amort_adelanto)}</td><td class="num">${lib ? "" : soles(v.retencion)}</td><td class="num">${lib ? "" : soles(v.otros_descuentos)}</td><td class="num" style="font-weight:600;">${soles(n)}</td><td class="num">${lib ? "" : soles(igv)}</td><td class="num">${soles(n + igv)}</td><td><span class="badge ${v.estado === "Pagada" ? "ok" : v.estado === "Aprobada" ? "warn" : "late"}">${v.estado}</span></td><td>${esc(v.factura)}</td><td>${fd(v.fecha_pago)}</td><td style="white-space:nowrap;">${puedeEditar() ? `<button class="btn secondary mini" data-sved="${v.id}">Editar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-svdel="${v.id}">Borrar</button>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="15" style="color:var(--text-muted);">Aún no hay valorizaciones.</td></tr>`;
+  $("svNueva").style.display = puedeEditar() ? "" : "none";
+  $("svCerrarSub").style.display = puedeEditar() && SV_PAQ.estado !== "Cerrado" && contratoAgotado(r) ? "" : "none";
+}
+
+function svAjustarTipo() {
+  const lib = $("svTipo").value !== "Valorización";
+  document.querySelectorAll(".sv-desc").forEach(e => e.style.display = lib ? "none" : "");
+  $("svBrutoL").textContent = lib ? "Monto de retención liberado (S/)" : "Monto bruto valorizado (S/)";
+  svNeto();
+}
+function svNeto() {
+  const b = Number($("svBruto").value) || 0;
+  if ($("svTipo").value !== "Valorización") { $("svNeto").textContent = `A pagar: S/ ${fmt2(b)}`; return; }
+  const n = b - (Number($("svAmort").value) || 0) - (Number($("svRet").value) || 0) - (Number($("svOtros").value) || 0);
+  $("svNeto").textContent = `Neto: S/ ${fmt2(n)} · IGV 18 % (referencial): S/ ${fmt2(n * 0.18)} · Total: S/ ${fmt2(n * 1.18)}`;
+}
+function svSugerir() {
+  if (SV_EDIT || $("svTipo").value !== "Valorización") return;
+  const b = Number($("svBruto").value) || 0;
+  $("svAmort").value = b ? (b * (Number(SV_PAQ.adelanto_pct) || 0) / 100).toFixed(2) : "";
+  $("svRet").value = b ? (b * (Number(SV_PAQ.retencion_pct) || 0) / 100).toFixed(2) : "";
+  svNeto();
+}
+
+function abrirSV(v) {
+  SV_EDIT = v || null;
+  $("svFormTitulo").textContent = v ? `Editar valorización N° ${v.numero}` : "Nueva valorización";
+  $("svForm").reset();
+  $("svTipo").value = v ? v.tipo : "Valorización";
+  $("svPeriodo").value = v ? (v.periodo || "") : hoyISO().slice(0, 7);
+  $("svDesc").value = v ? (v.descripcion || "") : "";
+  $("svBruto").value = v ? v.monto_bruto : "";
+  $("svAmort").value = v ? v.amort_adelanto : ""; $("svRet").value = v ? v.retencion : ""; $("svOtros").value = v ? v.otros_descuentos : "";
+  $("svEstado").value = v ? v.estado : "Presentada";
+  $("svFactura").value = v ? (v.factura || "") : "";
+  $("svFPres").value = v ? (v.fecha_presentacion || "") : hoyISO();
+  $("svFPago").value = v ? (v.fecha_pago || "") : "";
+  $("svObs").value = v ? (v.observaciones || "") : "";
+  $("svMsg").textContent = "";
+  $("svForm").style.display = "";
+  svAjustarTipo();
+  $("svForm").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function guardarSV(e) {
+  e.preventDefault();
+  const lib = $("svTipo").value !== "Valorización";
+  const fila = {
+    proyecto_id: PID, paquete_id: SV_PAQ.id, tipo: $("svTipo").value, periodo: txt("svPeriodo"), descripcion: txt("svDesc"),
+    monto_bruto: Number($("svBruto").value) || 0,
+    amort_adelanto: lib ? 0 : (Number($("svAmort").value) || 0), retencion: lib ? 0 : (Number($("svRet").value) || 0), otros_descuentos: lib ? 0 : (Number($("svOtros").value) || 0),
+    estado: $("svEstado").value, factura: txt("svFactura"), fecha_presentacion: txt("svFPres"),
+    fecha_pago: txt("svFPago") || ($("svEstado").value === "Pagada" ? hoyISO() : null), observaciones: txt("svObs"),
+  };
+  if (fila.amort_adelanto + fila.retencion + fila.otros_descuentos > fila.monto_bruto) { $("svMsg").textContent = "Los descuentos no pueden superar el monto bruto."; return; }
+  if (!lib && !SV_EDIT) {
+    const r = resumenSub(SV_PAQ);
+    if (fila.monto_bruto > r.saldo + 0.5 && !confirm(`Esta valorización (S/ ${soles(fila.monto_bruto)}) supera el saldo del contrato (S/ ${soles(r.saldo)}). ¿Registrar de todos modos? Considera un adicional de subcontrata.`)) return;
+  }
+  let error;
+  if (SV_EDIT) ({ error } = await supabaseClient.from("lg_sub_vals").update(fila).eq("id", SV_EDIT.id));
+  else {
+    fila.numero = valsDe(SV_PAQ.id).reduce((m, v) => Math.max(m, v.numero), 0) + 1;
+    ({ error } = await supabaseClient.from("lg_sub_vals").insert(fila));
+  }
+  if (error) { $("svMsg").textContent = "No se pudo guardar: " + error.message; return; }
+  const id = SV_PAQ.id;
+  await cargar(); abrirSub(id);
+}
+
+async function cerrarSub() {
+  const r = resumenSub(SV_PAQ);
+  const aviso = r.ret > 0.5 ? `\n\nAún hay S/ ${soles(r.ret)} retenidos como fondo de garantía; registra su liberación cuando corresponda.` : "";
+  if (!confirm(`¿Cerrar la subcontrata "${SV_PAQ.nombre}"? El contrato está valorizado y pagado.${aviso}`)) return;
+  const { error } = await supabaseClient.from("lg_paquetes").update({ estado: "Cerrado", fecha_cierre: hoyISO() }).eq("id", SV_PAQ.id);
+  if (error) { alert(error.message); return; }
+  const id = SV_PAQ.id; await cargar(); abrirSub(id);
+}
+
+function enlazarEventosExtra() {
+  // Almacén
+  $("alNuevoIng").addEventListener("click", () => abrirMov("Ingreso"));
+  $("alNuevoSal").addEventListener("click", () => abrirMov("Salida"));
+  $("alCancelar").addEventListener("click", () => $("alForm").style.display = "none");
+  $("amTipo").addEventListener("change", ajustarMovForm);
+  $("amPaq").addEventListener("change", alElegirPaq);
+  $("alForm").addEventListener("submit", guardarMov);
+  $("alBuscar").addEventListener("input", renderAlmacen);
+  $("alFTipo").addEventListener("change", renderAlmacen);
+  $("alTabPend").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.rec) abrirMov("Ingreso", b.dataset.rec); });
+  $("alTabMov").addEventListener("click", async (e) => {
+    const b = e.target.closest("button"); if (!b || !b.dataset.mdel) return;
+    if (!confirm("¿Borrar este movimiento? El stock se recalcula.")) return;
+    const { error } = await supabaseClient.from("lg_alm_mov").delete().eq("id", b.dataset.mdel);
+    if (error) alert(error.message); else await cargar();
+  });
+  $("alCSVStock").addEventListener("click", () => descargarCSV("almacen_stock.csv", ["Material", "Unidad", "Ingresos", "Salidas", "Stock", "Último movimiento"],
+    stockCalc().map(r => [r.material, r.unidad, r.ing, r.sal, r.ing - r.sal, fd(r.ultimo)])));
+  $("alCSVMov").addEventListener("click", () => descargarCSV("almacen_movimientos.csv", ["Fecha", "Tipo", "Material", "Unidad", "Cantidad", "Documento", "Proveedor / retira", "Frente", "Observaciones"],
+    MOV.map(m => [fd(m.fecha), m.tipo, m.material, m.unidad, m.cantidad, m.documento, m.contraparte, m.frente, m.observaciones])));
+  // Valorizaciones de subcontratas
+  $("svResumen").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.sv) abrirSub(b.dataset.sv); });
+  $("svNueva").addEventListener("click", () => abrirSV(null));
+  $("svCancelar").addEventListener("click", () => $("svForm").style.display = "none");
+  $("svCerrar").addEventListener("click", () => { SV_PAQ = null; $("svCard").style.display = "none"; });
+  $("svCerrarSub").addEventListener("click", cerrarSub);
+  $("svForm").addEventListener("submit", guardarSV);
+  $("svTipo").addEventListener("change", svAjustarTipo);
+  $("svBruto").addEventListener("input", () => { svSugerir(); svNeto(); });
+  ["svAmort", "svRet", "svOtros"].forEach(id => $(id).addEventListener("input", svNeto));
+  $("svTabla").addEventListener("click", async (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.sved) abrirSV(SVALS.find(v => v.id === b.dataset.sved));
+    if (b.dataset.svdel && confirm("¿Borrar esta valorización?")) {
+      const id = SV_PAQ.id;
+      const { error } = await supabaseClient.from("lg_sub_vals").delete().eq("id", b.dataset.svdel);
+      if (error) alert(error.message); else { await cargar(); abrirSub(id); }
+    }
+  });
+  $("svCSV").addEventListener("click", () => {
+    if (!SV_PAQ) return;
+    descargarCSV(`valorizaciones_subcontrata_${SV_PAQ.numero}.csv`, ["N°", "Tipo", "Periodo", "Descripción", "Bruto", "Adelanto", "Retención", "Otros", "Neto", "Estado", "Factura", "Fecha de pago"],
+      valsDe(SV_PAQ.id).map(v => [v.numero, v.tipo, v.periodo, v.descripcion, v.monto_bruto, v.amort_adelanto, v.retencion, v.otros_descuentos, netoDe(v), v.estado, v.factura, fd(v.fecha_pago)]));
+  });
 }
