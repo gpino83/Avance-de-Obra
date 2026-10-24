@@ -496,9 +496,7 @@ function renderPagos() {
 
 function abrirPagos(id) {
   PG_PAQ = PAQ.find(p => p.id === id); if (!PG_PAQ) return;
-  $("pgCard").style.display = ""; $("pgMsg").textContent = "";
-  $("pfFFact").value = hoyISO();
-  $("pgForm").style.display = puedeEditar() ? "" : "none";
+  $("pgCard").style.display = "";
   renderPagoDet();
   $("pgCard").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -507,16 +505,8 @@ function renderPagoDet() {
   const hoy = hoyISO();
   $("pgDet").querySelector("tbody").innerHTML = PAGOS.filter(x => x.paquete_id === PG_PAQ.id).sort((a, b) => (a.fecha_factura || "").localeCompare(b.fecha_factura || "")).map(x => {
     const venc = x.estado !== "Pagada" && x.fecha_vencimiento && x.fecha_vencimiento < hoy;
-    return `<tr><td>${esc(x.factura)}</td><td>${fd(x.fecha_factura)}</td><td class="num">${soles(x.monto)}</td><td>${fd(x.fecha_vencimiento)} ${venc ? '<span class="badge late">Vencida</span>' : ""}</td><td><span class="badge ${x.estado === "Pagada" ? "ok" : "warn"}">${x.estado}</span></td><td>${fd(x.fecha_pago)}</td><td>${esc(x.observaciones)}</td><td style="white-space:nowrap;">${puedeEditar() && x.estado !== "Pagada" ? `<button class="btn secondary mini" data-pagar="${x.id}">Marcar pagada</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-pdel="${x.id}">Borrar</button>` : ""}</td></tr>`;
-  }).join("") || `<tr><td colspan="8" style="color:var(--text-muted);">Aún no hay facturas registradas.</td></tr>`;
-}
-
-async function agregarPago(e) {
-  e.preventDefault();
-  const fila = { proyecto_id: PID, paquete_id: PG_PAQ.id, factura: txt("pfFact"), fecha_factura: txt("pfFFact"), monto: Number($("pfMontoF").value) || 0, fecha_vencimiento: txt("pfFVenc"), observaciones: txt("pfObsF") };
-  const { error } = await supabaseClient.from("lg_pagos").insert(fila);
-  if (error) { $("pgMsg").textContent = "No se pudo guardar: " + error.message; return; }
-  const id = PG_PAQ.id; $("pgForm").reset(); await cargar(); abrirPagos(id);
+    return `<tr><td>${esc(x.factura)}</td><td>${fd(x.fecha_factura)}</td><td class="num">${soles(x.monto)}</td><td>${fd(x.fecha_vencimiento)} ${venc ? '<span class="badge late">Vencida</span>' : ""}</td><td><span class="badge ${x.estado === "Pagada" ? "ok" : "warn"}">${x.estado}</span></td><td>${fd(x.fecha_pago)}</td><td>${esc(x.observaciones)}</td></tr>`;
+  }).join("") || `<tr><td colspan="7" style="color:var(--text-muted);">Aún no hay facturas registradas.</td></tr>`;
 }
 
 function enlazarEventosExtra() {
@@ -543,20 +533,6 @@ function enlazarEventosExtra() {
   // Estado de pagos
   $("pgFTipo").addEventListener("change", renderPagos);
   $("pgTabla").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.pg) abrirPagos(b.dataset.pg); });
-  $("pgForm").addEventListener("submit", agregarPago);
-  $("pgCerrar").addEventListener("click", () => { PG_PAQ = null; $("pgCard").style.display = "none"; });
-  $("pgDet").addEventListener("click", async (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    const id = PG_PAQ.id;
-    if (b.dataset.pagar) {
-      const { error } = await supabaseClient.from("lg_pagos").update({ estado: "Pagada", fecha_pago: hoyISO() }).eq("id", b.dataset.pagar);
-      if (error) alert(error.message); else { await cargar(); abrirPagos(id); }
-    }
-    if (b.dataset.pdel && confirm("¿Borrar esta factura?")) {
-      const { error } = await supabaseClient.from("lg_pagos").delete().eq("id", b.dataset.pdel);
-      if (error) alert(error.message); else { await cargar(); abrirPagos(id); }
-    }
-  });
   $("pgCSV").addEventListener("click", () => descargarCSV("estado_de_pagos.csv", ["N°", "Tipo", "Paquete", "Proveedor", "Comprometido", "Facturado", "Pagado", "Por pagar", "Sin facturar"],
     PAQ.filter(p => ESTADOS_ADJ.includes(p.estado)).map(p => { const r = pagoResumen(p); return [p.numero, p.tipo, p.nombre, p.proveedor, r.comp, r.fact, r.pag, r.por, Math.max(0, r.sin)]; })));
 }
