@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calidad</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  .in { padding:7px 10px; border-radius:8px; border:1px solid var(--border); font:inherit; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
+  .bar .btn, .field .btn { width:auto; }
+  .grid-f { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0 14px; }
+  .full { grid-column:1/-1; }
+  .back { color:var(--blue); text-decoration:none; font-size:12.5px; margin-right:6px; }
+  .mini { width:auto !important; padding:3px 8px; font-size:11.5px; }
+  .bar-h { height:10px; border-radius:5px; background:#e9e8e2; overflow:hidden; min-width:90px; }
+  .bar-h > i { display:block; height:100%; background:var(--blue); }
+  .num { text-align:right; white-space:nowrap; }
+  .chk-row { display:grid; grid-template-columns:1fr 130px 28px; gap:8px; align-items:center; margin:0 0 6px; }
+  .chk-row button { width:26px; height:26px; border-radius:50%; border:1px solid var(--border); background:#fff; cursor:pointer; line-height:1; }
+  .fotos-act { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+  .foto-th { position:relative; }
+  .foto-th img { height:72px; width:auto; border-radius:6px; border:1px solid var(--border); display:block; }
+  .foto-th button { position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; border:none; background:var(--red); color:#fff; font-size:13px; line-height:20px; cursor:pointer; padding:0; }
+  .foto-modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .foto-modal .in-box { background:var(--surface-1,#fff); border-radius:12px; max-width:980px; max-height:90vh; overflow:auto; padding:18px 20px; width:100%; }
+  .foto-modal img { height:210px; width:auto; max-width:100%; border-radius:8px; border:1px solid var(--border); margin:0 8px 8px 0; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1><a class="back" href="modulos.html?elegir" id="backLink" style="display:none;">← Módulos</a>Calidad</h1>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="who">Hola, <b id="userName">...</b> <span id="userRole"></span></span>
+    <button class="logout-btn" id="logoutBtn">Salir</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-view="tablero">Tablero</button>
+  <button class="tab-btn" data-view="protocolos">Protocolos</button>
+  <button class="tab-btn" data-view="nc">No conformidades</button>
+  <button class="tab-btn" data-view="ensayos">Pruebas y ensayos</button>
+</nav>
+
+<main class="content">
+  <div class="card">
+    <label style="font-size:12.5px; color:var(--text-secondary);">Proyecto</label><br>
+    <select id="clProyecto" class="in" style="margin-top:6px;"></select>
+  </div>
+
+  <!-- ============ TABLERO ============ -->
+  <section class="view active" id="view-tablero">
+    <div class="stat-row" id="clStats"></div>
+    <div class="card">
+      <h2>Alertas</h2>
+      <p class="save-hint">No conformidades vencidas o críticas abiertas, protocolos sin resolver cuya fecha ya pasó y ensayos con resultado pendiente.</p>
+      <div style="overflow-x:auto;"><table class="data-table" id="clTabAlertas"><thead><tr><th>Código</th><th>Tipo</th><th>Detalle</th><th>Frente</th><th>Fecha</th><th>Alerta</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Calidad por frente</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="clTabFrente"><thead><tr><th>Frente</th><th class="num">Protocolos</th><th class="num">Aprobados</th><th>% aprobado</th><th class="num">NC abiertas</th><th class="num">Ensayos que no cumplen</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>No conformidades por severidad</h2>
+      <div style="overflow-x:auto;"><table class="data-table" id="clTabSev"><thead><tr><th>Severidad</th><th class="num">Abiertas</th><th class="num">Cerradas</th><th class="num">Total</th><th class="num">Costo estimado de retrabajo (S/)</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ PROTOCOLOS ============ -->
+  <section class="view" id="view-protocolos">
+    <form class="card" id="prForm" style="display:none;">
+      <h2 id="prFormTitulo">Nuevo protocolo</h2>
+      <div class="grid-f">
+        <div class="field"><label>Tipo de protocolo</label><select id="pfTipo" class="in"></select></div>
+        <div class="field full"><label>Título</label><input type="text" id="pfTitulo" class="in" required placeholder="Ej.: Vaciado de losa nivel 3 – eje A-D"></div>
+        <div class="field"><label>Frente</label><select id="pfFrente" class="in"></select></div>
+        <div class="field"><label>Partida ligada (opcional)</label><select id="pfPartida" class="in"></select></div>
+        <div class="field"><label>Ubicación (eje, nivel, ambiente)</label><input type="text" id="pfUbic" class="in"></div>
+        <div class="field"><label>Fecha de inspección</label><input type="date" id="pfFecha" class="in"></div>
+        <div class="field"><label>Inspector / responsable</label><input type="text" id="pfInsp" class="in" list="clInspList"><datalist id="clInspList"></datalist></div>
+        <div class="field"><label>Estado</label><select id="pfEstado" class="in"></select></div>
+        <div class="field full"><label>Lista de verificación</label>
+          <div id="pfChecklist"></div>
+          <div class="bar" style="margin:4px 0 0;"><button type="button" class="btn secondary mini" id="pfAddItem">+ Agregar ítem</button><span class="save-hint" id="pfResumen"></span></div>
+        </div>
+        <div class="field full"><label>Observaciones</label><input type="text" id="pfObs" class="in"></div>
+        <div class="field full"><label>Fotos</label><input type="file" id="pfFotosIn" accept="image/*" multiple><div class="save-hint" id="pfFotosCnt"></div><div id="pfFotosAct" class="fotos-act"></div></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="prCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="prMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+
+    <div class="card">
+      <h2>Protocolos de inspección</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="prNuevo">+ Nuevo protocolo</button>
+        <select id="prFEstado" class="in"></select>
+        <select id="prFTipo" class="in"></select>
+        <select id="prFFrente" class="in" style="max-width:260px;"></select>
+        <input type="text" id="prBuscar" class="in" placeholder="Buscar..." style="flex:1; min-width:160px;">
+        <button class="btn secondary" type="button" id="prCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="prTabla"><thead><tr><th>Código</th><th>Tipo</th><th>Título</th><th>Frente</th><th>Ubicación</th><th>Fecha</th><th>Inspector</th><th>Estado</th><th class="num">Verificación</th><th>Fotos</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ NO CONFORMIDADES ============ -->
+  <section class="view" id="view-nc">
+    <form class="card" id="ncForm" style="display:none;">
+      <h2 id="ncFormTitulo">Nueva no conformidad</h2>
+      <div class="grid-f">
+        <div class="field full"><label>Descripción de la no conformidad</label><input type="text" id="nfDesc" class="in" required></div>
+        <div class="field"><label>Severidad</label><select id="nfSev" class="in"><option>Menor</option><option>Mayor</option><option>Crítica</option></select></div>
+        <div class="field"><label>Frente</label><select id="nfFrente" class="in"></select></div>
+        <div class="field"><label>Partida ligada (opcional)</label><select id="nfPartida" class="in"></select></div>
+        <div class="field"><label>Protocolo de origen</label><select id="nfProt" class="in"></select></div>
+        <div class="field"><label>Responsable de la corrección</label><input type="text" id="nfResp" class="in" list="clRespList"><datalist id="clRespList"></datalist></div>
+        <div class="field"><label>Estado</label><select id="nfEstado" class="in"><option>Abierta</option><option>En corrección</option><option>Cerrada</option><option>Anulada</option></select></div>
+        <div class="field"><label>Fecha de detección</label><input type="date" id="nfFDet" class="in"></div>
+        <div class="field"><label>Fecha compromiso</label><input type="date" id="nfFComp" class="in"></div>
+        <div class="field"><label>Fecha de cierre</label><input type="date" id="nfFCierre" class="in"></div>
+        <div class="field"><label>Costo estimado de retrabajo (S/)</label><input type="number" id="nfCosto" class="in" step="0.01" min="0"></div>
+        <div class="field full"><label>Causa</label><input type="text" id="nfCausa" class="in"></div>
+        <div class="field full"><label>Acción correctiva</label><input type="text" id="nfCorr" class="in"></div>
+        <div class="field full"><label>Acción preventiva</label><input type="text" id="nfPrev" class="in"></div>
+        <div class="field full"><label>Fotos de la no conformidad</label><input type="file" id="nfFotosIn" accept="image/*" multiple><div class="save-hint" id="nfFotosCnt"></div><div id="nfFotosAct" class="fotos-act"></div></div>
+        <div class="field full"><label>Fotos del cierre (evidencia de la corrección)</label><input type="file" id="nfFotosCieIn" accept="image/*" multiple><div class="save-hint" id="nfFotosCieCnt"></div><div id="nfFotosCieAct" class="fotos-act"></div></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="ncCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="ncMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+
+    <div class="card">
+      <h2>No conformidades</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="ncNuevo">+ Nueva no conformidad</button>
+        <select id="ncFEstado" class="in"><option value="abiertas">Abiertas</option><option value="todas">Todas</option><option>Abierta</option><option>En corrección</option><option>Cerrada</option><option>Anulada</option></select>
+        <select id="ncFSev" class="in"><option value="">Todas las severidades</option><option>Menor</option><option>Mayor</option><option>Crítica</option></select>
+        <input type="text" id="ncBuscar" class="in" placeholder="Buscar..." style="flex:1; min-width:160px;">
+        <button class="btn secondary" type="button" id="ncCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="ncTabla"><thead><tr><th>Código</th><th>Severidad</th><th>Descripción</th><th>Frente</th><th>Responsable</th><th>Detección</th><th>Compromiso</th><th>Estado</th><th>Alerta</th><th>Fotos</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ ENSAYOS ============ -->
+  <section class="view" id="view-ensayos">
+    <form class="card" id="enForm" style="display:none;">
+      <h2 id="enFormTitulo">Nueva prueba o ensayo</h2>
+      <div class="grid-f">
+        <div class="field"><label>Tipo de ensayo</label><select id="efTipo" class="in"></select></div>
+        <div class="field full"><label>Elemento ensayado</label><input type="text" id="efDesc" class="in" required placeholder="Ej.: Losa nivel 3 – concreto f'c 280, mixer 2"></div>
+        <div class="field"><label>Frente</label><select id="efFrente" class="in"></select></div>
+        <div class="field"><label>Partida ligada (opcional)</label><select id="efPartida" class="in"></select></div>
+        <div class="field"><label>Laboratorio</label><input type="text" id="efLab" class="in"></div>
+        <div class="field"><label>Fecha de muestra</label><input type="date" id="efFMues" class="in"></div>
+        <div class="field"><label>Edad (días)</label><input type="number" id="efEdad" class="in" step="1" min="0" placeholder="7, 14, 28..."></div>
+        <div class="field"><label>Fecha de ensayo</label><input type="date" id="efFEns" class="in"></div>
+        <div class="field"><label>Criterio de aceptación</label><select id="efCrit" class="in"><option value="min">Mínimo (obtenido ≥ especificado)</option><option value="max">Máximo (obtenido ≤ especificado)</option></select></div>
+        <div class="field"><label>Valor especificado</label><input type="number" id="efEsp" class="in" step="any"></div>
+        <div class="field"><label>Unidad</label><input type="text" id="efUnd" class="in" placeholder="kg/cm², %, bar..."></div>
+        <div class="field"><label>Valor obtenido (vacío = pendiente)</label><input type="number" id="efObt" class="in" step="any"></div>
+        <div class="field full"><label>Informe del laboratorio (PDF o imagen)</label><input type="file" id="efArchivo" accept=".pdf,image/*"><div class="save-hint" id="efArchivoAct"></div></div>
+        <div class="field full"><label>Observaciones</label><input type="text" id="efObs" class="in"></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="enCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div class="save-hint" id="efResultado"></div>
+      <div id="enMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+
+    <div class="card">
+      <h2>Pruebas y ensayos</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="enNuevo">+ Nueva prueba / ensayo</button>
+        <select id="enFRes" class="in"><option value="">Todos los resultados</option><option>Pendiente</option><option>Cumple</option><option>No cumple</option></select>
+        <select id="enFTipo" class="in"></select>
+        <input type="text" id="enBuscar" class="in" placeholder="Buscar..." style="flex:1; min-width:160px;">
+        <button class="btn secondary" type="button" id="enCSV">Exportar a Excel (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="enTabla"><thead><tr><th>Código</th><th>Tipo</th><th>Elemento</th><th>Frente</th><th>Muestra</th><th class="num">Edad</th><th>Ensayo</th><th>Laboratorio</th><th class="num">Especificado</th><th class="num">Obtenido</th><th>Resultado</th><th>Informe</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+</main>
+
+<div class="foto-modal" id="fotoModal"><div class="in-box">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><h2 id="fmTitulo" style="margin:0; font-size:16px;"></h2><button class="btn secondary mini" type="button" id="fmCerrar">Cerrar</button></div>
+  <h3 style="font-size:13px; margin:8px 0 4px;" id="fmT1">Fotos</h3><div id="fmRep"></div>
+  <div id="fmCieW"><h3 style="font-size:13px; margin:8px 0 4px;">Cierre</h3><div id="fmCie"></div></div>
+</div></div>
+
+<script src="js/supabase-config.js"></script>
+<script src="js/fotos.js"></script>
+<script src="js/calidad.js"></script>
+</body>
+</html>
