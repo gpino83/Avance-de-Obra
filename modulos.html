@@ -42,11 +42,12 @@
 
   const OBRA = { href: "app.html", ico: "🏗️", bg: "#e8f0fb", titulo: "Control de Obra", txt: "Avance, curva S, restricciones, EDT y flujo de caja del proyecto." };
   const PV = { href: "postventa.html", ico: "🛠️", bg: "#e6f6ef", titulo: "Post Venta", txt: "Observaciones por unidad, actas de entrega, garantías y tablero de seguimiento." };
-  const LG = { href: "logistica.html", ico: "📦", bg: "#fdf1e4", titulo: "Logística", txt: "Procura de materiales, cierres de subcontratas, cuadros comparativos y alertas por cronograma." };
+  const LG = { href: "logistica.html", ico: "📦", bg: "#fdf1e4", titulo: "Procura", txt: "Compra de materiales y contratación de subcontratas, cuadros comparativos, almacén y alertas por cronograma." };
   const modulos = [];
   if (rol !== "postventa" && rol !== "logistica") modulos.push(OBRA);
-  if (["admin", "planner", "postventa", "viewer"].includes(rol)) modulos.push(PV);
   if (["admin", "planner", "logistica", "viewer"].includes(rol)) modulos.push(LG);
+  // (aquí irán Calidad y SSOMA)
+  if (["admin", "planner", "postventa", "viewer"].includes(rol)) modulos.push(PV);
 
   // Un solo módulo disponible: entra directo
   if (modulos.length === 1 && !location.search.includes("elegir")) { window.location.replace(modulos[0].href); return; }
