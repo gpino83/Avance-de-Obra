@@ -2,8 +2,8 @@
 // Módulo Logística: procura de materiales y cierres de subcontratas
 // =========================================================
 let U = null, PERFIL = null, PROYECTOS = [], PID = null;
-let PARTIDAS = [], PAQ = [], COT = [], MOV = [], SVALS = [];
-let SV_PAQ = null, SV_EDIT = null;
+let PARTIDAS = [], PAQ = [], COT = [], MOV = [], SVALS = [], PAGOS = [];
+let PG_PAQ = null;
 let EDIT = null, COT_PAQ = null;
 
 const ESTADOS = ["Por solicitar", "En cotización", "Adjudicado", "Orden / Contrato", "Cerrado", "Anulado"];
@@ -73,6 +73,7 @@ async function cargar() {
   PARTIDAS = pa; PAQ = pk;
   MOV = await fetchAll(() => supabaseClient.from("lg_alm_mov").select("*").eq("proyecto_id", PID).order("fecha", { ascending: false }).order("created_at", { ascending: false }));
   SVALS = await fetchAll(() => supabaseClient.from("lg_sub_vals").select("*").eq("proyecto_id", PID).order("numero"));
+  PAGOS = await fetchAll(() => supabaseClient.from("lg_pagos").select("*").eq("proyecto_id", PID).order("fecha_factura"));
   const ids = PAQ.map(p => p.id);
   COT = [];
   for (let i = 0; i < ids.length; i += 100) {
@@ -80,8 +81,8 @@ async function cargar() {
     COT = COT.concat(data || []);
   }
   COT_PAQ = null; $("cotCard").style.display = "none";
-  SV_PAQ = null; $("svCard").style.display = "none";
-  [renderTablero, renderPaquetes, renderAlmacen, renderSubResumen].forEach(fn => { try { fn(); } catch (e) { console.error(fn.name, e); } });
+  PG_PAQ = null; $("pgCard").style.display = "none";
+  [renderTablero, renderPaquetes, renderAlmacen, renderPagos].forEach(fn => { try { fn(); } catch (e) { console.error(fn.name, e); } });
 }
 
 const cantTxt = (p) => p.cantidad != null && p.cantidad !== "" ? `${Number(p.cantidad).toLocaleString("es-PE", { maximumFractionDigits: 2 })} ${esc(p.unidad || "")}` : (p.unidad ? esc(p.unidad) : "");
@@ -455,131 +456,67 @@ async function guardarMov(e) {
 }
 
 // =========================================================
-// VALORIZACIONES DE SUBCONTRATAS
+// ESTADO DE PAGOS (materiales: se registra aquí; subcontratas: se lee de Control de Obra)
 // =========================================================
-const subs = () => PAQ.filter(p => p.tipo === "Subcontrata" && ESTADOS_ADJ.includes(p.estado));
-const valsDe = (pid) => SVALS.filter(v => v.paquete_id === pid).sort((a, b) => a.numero - b.numero);
+const valsDe = (pid) => SVALS.filter(v => v.paquete_id === pid);
 const netoDe = (v) => v.tipo === "Liberación de retención" ? Number(v.monto_bruto) : Number(v.monto_bruto) - Number(v.amort_adelanto) - Number(v.retencion) - Number(v.otros_descuentos);
+const totalDe = (v) => v.tipo === "Liberación de retención" ? netoDe(v) : netoDe(v) * 1.18;
 
-function resumenSub(p) {
-  const vs = valsDe(p.id), vv = vs.filter(v => v.tipo === "Valorización"), lib = vs.filter(v => v.tipo !== "Valorización");
-  const contrato = Number(p.monto_comprometido) || 0;
-  const bruto = vv.reduce((s, v) => s + Number(v.monto_bruto), 0);
-  const ret = vv.reduce((s, v) => s + Number(v.retencion), 0) - lib.reduce((s, v) => s + Number(v.monto_bruto), 0);
-  const pagado = vs.filter(v => v.estado === "Pagada").reduce((s, v) => s + netoDe(v), 0);
-  const porPagar = vs.filter(v => v.estado !== "Pagada").reduce((s, v) => s + netoDe(v), 0);
-  return { contrato, bruto, saldo: contrato - bruto, pct: contrato ? bruto / contrato * 100 : 0, ret, pagado, porPagar, vs };
-}
-
-function renderSubResumen() {
-  $("svResumen").querySelector("tbody").innerHTML = subs().map(p => {
-    const r = resumenSub(p);
-    let al = "";
-    if (r.saldo < -0.5) al = `<span class="badge late">Excede el contrato en S/ ${soles(-r.saldo)}</span>`;
-    else if (p.estado === "Cerrado") al = r.ret > 0.5 ? `<span class="badge warn">Retención por devolver</span>` : `<span class="badge ok">Cerrada</span>`;
-    else if (contratoAgotado(r)) al = `<span class="badge warn">Listo para cerrar</span>`;
-    return `<tr><td>${p.numero}</td><td>${esc(p.nombre)}</td><td>${esc(p.proveedor)}</td><td class="num">${soles(r.contrato)}</td><td class="num">${soles(r.bruto)}</td><td class="num">${r.pct.toFixed(1)} %</td><td class="num">${soles(r.saldo)}</td><td class="num">${soles(r.ret)}</td><td class="num">${soles(r.pagado)}</td><td class="num">${soles(r.porPagar)}</td><td>${al}</td><td><button class="btn secondary mini" data-sv="${p.id}">Valorizaciones (${r.vs.length})</button></td></tr>`;
-  }).join("") || `<tr><td colspan="12" style="color:var(--text-muted);">No hay subcontratas adjudicadas. Adjudica un paquete de tipo Subcontrata en la pestaña Procura y Subcontratas.</td></tr>`;
-}
-const contratoAgotado = (r) => r.contrato > 0 && r.bruto >= r.contrato * 0.995 && r.porPagar < 0.5;
-
-function abrirSub(id) {
-  SV_PAQ = PAQ.find(p => p.id === id);
-  if (!SV_PAQ) return;
-  $("svCard").style.display = "";
-  $("svForm").style.display = "none";
-  $("svTitulo").textContent = `Valorizaciones — N° ${SV_PAQ.numero} ${SV_PAQ.nombre}`;
-  renderSub();
-  $("svCard").scrollIntoView({ behavior: "smooth", block: "start" });
+function pagoResumen(p) {
+  const comp = Number(p.monto_comprometido) || 0;
+  if (p.tipo === "Subcontrata") {
+    const vs = valsDe(p.id);
+    const fact = vs.reduce((s, v) => s + totalDe(v), 0);
+    const pag = vs.filter(v => v.estado === "Pagada").reduce((s, v) => s + totalDe(v), 0);
+    return { comp, fact, pag, por: fact - pag, sin: comp * 1.18 - fact, venc: 0, sub: true };
+  }
+  const l = PAGOS.filter(x => x.paquete_id === p.id);
+  const fact = l.reduce((s, x) => s + Number(x.monto), 0);
+  const pag = l.filter(x => x.estado === "Pagada").reduce((s, x) => s + Number(x.monto), 0);
+  const hoy = hoyISO();
+  const venc = l.filter(x => x.estado !== "Pagada" && x.fecha_vencimiento && x.fecha_vencimiento < hoy).length;
+  return { comp, fact, pag, por: fact - pag, sin: comp * 1.18 - fact, venc, sub: false };
 }
 
-function renderSub() {
-  if (!SV_PAQ) return;
-  SV_PAQ = PAQ.find(p => p.id === SV_PAQ.id) || SV_PAQ;
-  const r = resumenSub(SV_PAQ);
-  $("svRef").textContent = `Proveedor: ${SV_PAQ.proveedor || "—"} · Contrato S/ ${soles(r.contrato)} · Adelanto ${SV_PAQ.adelanto_pct ?? 0} % · Retención ${SV_PAQ.retencion_pct ?? 5} % · Saldo por valorizar S/ ${soles(r.saldo)}`;
-  $("svTabla").querySelector("tbody").innerHTML = r.vs.map(v => {
-    const n = netoDe(v), igv = v.tipo === "Valorización" ? n * 0.18 : 0;
-    const lib = v.tipo !== "Valorización";
-    return `<tr><td>${v.numero}</td><td>${lib ? "Liberación de retención" : "Valorización"}</td><td>${esc(v.periodo)}</td><td>${esc(v.descripcion)}</td><td class="num">${soles(v.monto_bruto)}</td><td class="num">${lib ? "" : soles(v.amort_adelanto)}</td><td class="num">${lib ? "" : soles(v.retencion)}</td><td class="num">${lib ? "" : soles(v.otros_descuentos)}</td><td class="num" style="font-weight:600;">${soles(n)}</td><td class="num">${lib ? "" : soles(igv)}</td><td class="num">${soles(n + igv)}</td><td><span class="badge ${v.estado === "Pagada" ? "ok" : v.estado === "Aprobada" ? "warn" : "late"}">${v.estado}</span></td><td>${esc(v.factura)}</td><td>${fd(v.fecha_pago)}</td><td style="white-space:nowrap;">${puedeEditar() ? `<button class="btn secondary mini" data-sved="${v.id}">Editar</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-svdel="${v.id}">Borrar</button>` : ""}</td></tr>`;
-  }).join("") || `<tr><td colspan="15" style="color:var(--text-muted);">Aún no hay valorizaciones.</td></tr>`;
-  $("svNueva").style.display = puedeEditar() ? "" : "none";
-  $("svCerrarSub").style.display = puedeEditar() && SV_PAQ.estado !== "Cerrado" && contratoAgotado(r) ? "" : "none";
+function renderPagos() {
+  const lista = PAQ.filter(p => ESTADOS_ADJ.includes(p.estado) && (!$("pgFTipo").value || p.tipo === $("pgFTipo").value));
+  const todos = PAQ.filter(p => ESTADOS_ADJ.includes(p.estado)).map(pagoResumen);
+  const por = todos.reduce((s, r) => s + r.por, 0), venc = todos.reduce((s, r) => s + r.venc, 0);
+  const tile = (l, v, c) => `<div class="stat-tile"><div class="label">${l}</div><div class="value ${c || ""}">${v}</div></div>`;
+  $("pgStats").innerHTML = tile("Facturado (S/)", soles(todos.reduce((s, r) => s + r.fact, 0))) + tile("Pagado (S/)", soles(todos.reduce((s, r) => s + r.pag, 0))) +
+    tile("Por pagar (S/)", soles(por)) + tile("Facturas vencidas", venc, venc ? "bad" : "");
+  $("pgTabla").querySelector("tbody").innerHTML = lista.map(p => {
+    const r = pagoResumen(p);
+    const al = r.venc ? `<span class="badge late">${r.venc} factura(s) vencida(s)</span>` : (r.sin < -1 ? `<span class="badge warn">Facturado sobre lo comprometido</span>` : "");
+    const acc = r.sub ? `<span class="save-hint">Control de Obra</span>` : `<button class="btn secondary mini" data-pg="${p.id}">Facturas (${PAGOS.filter(x => x.paquete_id === p.id).length})</button>`;
+    return `<tr><td>${p.numero}</td><td>${p.tipo}</td><td>${esc(p.nombre)}</td><td>${esc(p.proveedor)}</td><td class="num">${soles(r.comp)}</td><td class="num">${soles(r.fact)}</td><td class="num">${soles(r.pag)}</td><td class="num" style="font-weight:600;">${soles(r.por)}</td><td class="num">${soles(Math.max(0, r.sin))}</td><td>${al}</td><td>${acc}</td></tr>`;
+  }).join("") || `<tr><td colspan="11" style="color:var(--text-muted);">No hay paquetes adjudicados.</td></tr>`;
+  if (PG_PAQ) renderPagoDet();
 }
 
-function svAjustarTipo() {
-  const lib = $("svTipo").value !== "Valorización";
-  document.querySelectorAll(".sv-desc").forEach(e => e.style.display = lib ? "none" : "");
-  $("svBrutoL").textContent = lib ? "Monto de retención liberado (S/)" : "Monto bruto valorizado (S/)";
-  svNeto();
+function abrirPagos(id) {
+  PG_PAQ = PAQ.find(p => p.id === id); if (!PG_PAQ) return;
+  $("pgCard").style.display = ""; $("pgMsg").textContent = "";
+  $("pfFFact").value = hoyISO();
+  $("pgForm").style.display = puedeEditar() ? "" : "none";
+  renderPagoDet();
+  $("pgCard").scrollIntoView({ behavior: "smooth", block: "start" });
 }
-function svNeto() {
-  const b = Number($("svBruto").value) || 0;
-  if ($("svTipo").value !== "Valorización") { $("svNeto").textContent = `A pagar: S/ ${fmt2(b)}`; return; }
-  const n = b - (Number($("svAmort").value) || 0) - (Number($("svRet").value) || 0) - (Number($("svOtros").value) || 0);
-  $("svNeto").textContent = `Neto: S/ ${fmt2(n)} · IGV 18 % (referencial): S/ ${fmt2(n * 0.18)} · Total: S/ ${fmt2(n * 1.18)}`;
-}
-function svSugerir() {
-  if (SV_EDIT || $("svTipo").value !== "Valorización") return;
-  const b = Number($("svBruto").value) || 0;
-  $("svAmort").value = b ? (b * (Number(SV_PAQ.adelanto_pct) || 0) / 100).toFixed(2) : "";
-  $("svRet").value = b ? (b * (Number(SV_PAQ.retencion_pct) || 0) / 100).toFixed(2) : "";
-  svNeto();
+function renderPagoDet() {
+  $("pgTitulo").textContent = `Facturas — N° ${PG_PAQ.numero} ${PG_PAQ.nombre} (comprometido S/ ${soles(PG_PAQ.monto_comprometido)} sin IGV)`;
+  const hoy = hoyISO();
+  $("pgDet").querySelector("tbody").innerHTML = PAGOS.filter(x => x.paquete_id === PG_PAQ.id).sort((a, b) => (a.fecha_factura || "").localeCompare(b.fecha_factura || "")).map(x => {
+    const venc = x.estado !== "Pagada" && x.fecha_vencimiento && x.fecha_vencimiento < hoy;
+    return `<tr><td>${esc(x.factura)}</td><td>${fd(x.fecha_factura)}</td><td class="num">${soles(x.monto)}</td><td>${fd(x.fecha_vencimiento)} ${venc ? '<span class="badge late">Vencida</span>' : ""}</td><td><span class="badge ${x.estado === "Pagada" ? "ok" : "warn"}">${x.estado}</span></td><td>${fd(x.fecha_pago)}</td><td>${esc(x.observaciones)}</td><td style="white-space:nowrap;">${puedeEditar() && x.estado !== "Pagada" ? `<button class="btn secondary mini" data-pagar="${x.id}">Marcar pagada</button> ` : ""}${puedeBorrar() ? `<button class="btn secondary mini" data-pdel="${x.id}">Borrar</button>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="8" style="color:var(--text-muted);">Aún no hay facturas registradas.</td></tr>`;
 }
 
-function abrirSV(v) {
-  SV_EDIT = v || null;
-  $("svFormTitulo").textContent = v ? `Editar valorización N° ${v.numero}` : "Nueva valorización";
-  $("svForm").reset();
-  $("svTipo").value = v ? v.tipo : "Valorización";
-  $("svPeriodo").value = v ? (v.periodo || "") : hoyISO().slice(0, 7);
-  $("svDesc").value = v ? (v.descripcion || "") : "";
-  $("svBruto").value = v ? v.monto_bruto : "";
-  $("svAmort").value = v ? v.amort_adelanto : ""; $("svRet").value = v ? v.retencion : ""; $("svOtros").value = v ? v.otros_descuentos : "";
-  $("svEstado").value = v ? v.estado : "Presentada";
-  $("svFactura").value = v ? (v.factura || "") : "";
-  $("svFPres").value = v ? (v.fecha_presentacion || "") : hoyISO();
-  $("svFPago").value = v ? (v.fecha_pago || "") : "";
-  $("svObs").value = v ? (v.observaciones || "") : "";
-  $("svMsg").textContent = "";
-  $("svForm").style.display = "";
-  svAjustarTipo();
-  $("svForm").scrollIntoView({ behavior: "smooth", block: "center" });
-}
-
-async function guardarSV(e) {
+async function agregarPago(e) {
   e.preventDefault();
-  const lib = $("svTipo").value !== "Valorización";
-  const fila = {
-    proyecto_id: PID, paquete_id: SV_PAQ.id, tipo: $("svTipo").value, periodo: txt("svPeriodo"), descripcion: txt("svDesc"),
-    monto_bruto: Number($("svBruto").value) || 0,
-    amort_adelanto: lib ? 0 : (Number($("svAmort").value) || 0), retencion: lib ? 0 : (Number($("svRet").value) || 0), otros_descuentos: lib ? 0 : (Number($("svOtros").value) || 0),
-    estado: $("svEstado").value, factura: txt("svFactura"), fecha_presentacion: txt("svFPres"),
-    fecha_pago: txt("svFPago") || ($("svEstado").value === "Pagada" ? hoyISO() : null), observaciones: txt("svObs"),
-  };
-  if (fila.amort_adelanto + fila.retencion + fila.otros_descuentos > fila.monto_bruto) { $("svMsg").textContent = "Los descuentos no pueden superar el monto bruto."; return; }
-  if (!lib && !SV_EDIT) {
-    const r = resumenSub(SV_PAQ);
-    if (fila.monto_bruto > r.saldo + 0.5 && !confirm(`Esta valorización (S/ ${soles(fila.monto_bruto)}) supera el saldo del contrato (S/ ${soles(r.saldo)}). ¿Registrar de todos modos? Considera un adicional de subcontrata.`)) return;
-  }
-  let error;
-  if (SV_EDIT) ({ error } = await supabaseClient.from("lg_sub_vals").update(fila).eq("id", SV_EDIT.id));
-  else {
-    fila.numero = valsDe(SV_PAQ.id).reduce((m, v) => Math.max(m, v.numero), 0) + 1;
-    ({ error } = await supabaseClient.from("lg_sub_vals").insert(fila));
-  }
-  if (error) { $("svMsg").textContent = "No se pudo guardar: " + error.message; return; }
-  const id = SV_PAQ.id;
-  await cargar(); abrirSub(id);
-}
-
-async function cerrarSub() {
-  const r = resumenSub(SV_PAQ);
-  const aviso = r.ret > 0.5 ? `\n\nAún hay S/ ${soles(r.ret)} retenidos como fondo de garantía; registra su liberación cuando corresponda.` : "";
-  if (!confirm(`¿Cerrar la subcontrata "${SV_PAQ.nombre}"? El contrato está valorizado y pagado.${aviso}`)) return;
-  const { error } = await supabaseClient.from("lg_paquetes").update({ estado: "Cerrado", fecha_cierre: hoyISO() }).eq("id", SV_PAQ.id);
-  if (error) { alert(error.message); return; }
-  const id = SV_PAQ.id; await cargar(); abrirSub(id);
+  const fila = { proyecto_id: PID, paquete_id: PG_PAQ.id, factura: txt("pfFact"), fecha_factura: txt("pfFFact"), monto: Number($("pfMontoF").value) || 0, fecha_vencimiento: txt("pfFVenc"), observaciones: txt("pfObsF") };
+  const { error } = await supabaseClient.from("lg_pagos").insert(fila);
+  if (error) { $("pgMsg").textContent = "No se pudo guardar: " + error.message; return; }
+  const id = PG_PAQ.id; $("pgForm").reset(); await cargar(); abrirPagos(id);
 }
 
 function enlazarEventosExtra() {
@@ -603,28 +540,23 @@ function enlazarEventosExtra() {
     stockCalc().map(r => [r.material, r.unidad, r.ing, r.sal, r.ing - r.sal, fd(r.ultimo)])));
   $("alCSVMov").addEventListener("click", () => descargarCSV("almacen_movimientos.csv", ["Fecha", "Tipo", "Material", "Unidad", "Cantidad", "Documento", "Proveedor / retira", "Frente", "Observaciones"],
     MOV.map(m => [fd(m.fecha), m.tipo, m.material, m.unidad, m.cantidad, m.documento, m.contraparte, m.frente, m.observaciones])));
-  // Valorizaciones de subcontratas
-  $("svResumen").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.sv) abrirSub(b.dataset.sv); });
-  $("svNueva").addEventListener("click", () => abrirSV(null));
-  $("svCancelar").addEventListener("click", () => $("svForm").style.display = "none");
-  $("svCerrar").addEventListener("click", () => { SV_PAQ = null; $("svCard").style.display = "none"; });
-  $("svCerrarSub").addEventListener("click", cerrarSub);
-  $("svForm").addEventListener("submit", guardarSV);
-  $("svTipo").addEventListener("change", svAjustarTipo);
-  $("svBruto").addEventListener("input", () => { svSugerir(); svNeto(); });
-  ["svAmort", "svRet", "svOtros"].forEach(id => $(id).addEventListener("input", svNeto));
-  $("svTabla").addEventListener("click", async (e) => {
+  // Estado de pagos
+  $("pgFTipo").addEventListener("change", renderPagos);
+  $("pgTabla").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.pg) abrirPagos(b.dataset.pg); });
+  $("pgForm").addEventListener("submit", agregarPago);
+  $("pgCerrar").addEventListener("click", () => { PG_PAQ = null; $("pgCard").style.display = "none"; });
+  $("pgDet").addEventListener("click", async (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.sved) abrirSV(SVALS.find(v => v.id === b.dataset.sved));
-    if (b.dataset.svdel && confirm("¿Borrar esta valorización?")) {
-      const id = SV_PAQ.id;
-      const { error } = await supabaseClient.from("lg_sub_vals").delete().eq("id", b.dataset.svdel);
-      if (error) alert(error.message); else { await cargar(); abrirSub(id); }
+    const id = PG_PAQ.id;
+    if (b.dataset.pagar) {
+      const { error } = await supabaseClient.from("lg_pagos").update({ estado: "Pagada", fecha_pago: hoyISO() }).eq("id", b.dataset.pagar);
+      if (error) alert(error.message); else { await cargar(); abrirPagos(id); }
+    }
+    if (b.dataset.pdel && confirm("¿Borrar esta factura?")) {
+      const { error } = await supabaseClient.from("lg_pagos").delete().eq("id", b.dataset.pdel);
+      if (error) alert(error.message); else { await cargar(); abrirPagos(id); }
     }
   });
-  $("svCSV").addEventListener("click", () => {
-    if (!SV_PAQ) return;
-    descargarCSV(`valorizaciones_subcontrata_${SV_PAQ.numero}.csv`, ["N°", "Tipo", "Periodo", "Descripción", "Bruto", "Adelanto", "Retención", "Otros", "Neto", "Estado", "Factura", "Fecha de pago"],
-      valsDe(SV_PAQ.id).map(v => [v.numero, v.tipo, v.periodo, v.descripcion, v.monto_bruto, v.amort_adelanto, v.retencion, v.otros_descuentos, netoDe(v), v.estado, v.factura, fd(v.fecha_pago)]));
-  });
+  $("pgCSV").addEventListener("click", () => descargarCSV("estado_de_pagos.csv", ["N°", "Tipo", "Paquete", "Proveedor", "Comprometido", "Facturado", "Pagado", "Por pagar", "Sin facturar"],
+    PAQ.filter(p => ESTADOS_ADJ.includes(p.estado)).map(p => { const r = pagoResumen(p); return [p.numero, p.tipo, p.nombre, p.proveedor, r.comp, r.fact, r.pag, r.por, Math.max(0, r.sin)]; })));
 }

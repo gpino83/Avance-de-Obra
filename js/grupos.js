@@ -4,7 +4,7 @@
 // =========================================================
 window.OBRA_GRUPOS = [
   { id: "avance", nombre: "Avance", vistas: ["dashboard", "control", "kpis", "restricciones", "gantt", "avance", "asistente"] },
-  { id: "costos", nombre: "Costos", vistas: ["valorizacion", "costos", "adicionales", "flujo"] },
+  { id: "costos", nombre: "Costos", vistas: ["valorizacion", "costos", "subcontratas", "adicionales", "flujo"] },
   { id: "campo", nombre: "Campo", vistas: ["diario", "semanal", "cuaderno"] },
   { id: "docs", nombre: "Documentos", vistas: ["documentos", "rfi"] },
   { id: "plan", nombre: "Planificación", vistas: ["edt", "partidas", "lineasbase", "cargar", "usuarios"] },
