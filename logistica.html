@@ -9,7 +9,7 @@
 <style>
   .in { padding:7px 10px; border-radius:8px; border:1px solid var(--border); font:inherit; }
   .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
-  .bar .btn, .field .btn { width:auto; }
+  .bar .btn, .field .btn, form .btn { width:auto; }
   .grid-f { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0 14px; }
   .full { grid-column:1/-1; }
   .back { color:var(--blue); text-decoration:none; font-size:12.5px; margin-right:6px; }
@@ -32,6 +32,8 @@
 <nav class="tabs">
   <button class="tab-btn active" data-view="tablero">Tablero</button>
   <button class="tab-btn" data-view="paquetes">Procura y Subcontratas</button>
+  <button class="tab-btn" data-view="almacen">Almacén</button>
+  <button class="tab-btn" data-view="subvals">Valorizaciones de subcontratas</button>
 </nav>
 
 <main class="content">
@@ -69,6 +71,10 @@
         <div class="field"><label>Partida ligada (opcional)</label><select id="pfPartida" class="in"></select></div>
         <div class="field"><label>Responsable</label><input type="text" id="pfResp" class="in" list="lgRespList"><datalist id="lgRespList"></datalist></div>
         <div class="field"><label>Estado</label><select id="pfEstado" class="in"></select></div>
+        <div class="field"><label>Unidad</label><input type="text" id="pfUnd" class="in" list="lgUndList" placeholder="m3, kg, und, glb..."><datalist id="lgUndList"><option>und</option><option>m</option><option>m2</option><option>m3</option><option>kg</option><option>ton</option><option>bol</option><option>gl</option><option>glb</option><option>pza</option><option>var</option></datalist></div>
+        <div class="field"><label>Cantidad</label><input type="number" id="pfCant" class="in" step="0.01" min="0"></div>
+        <div class="field sub-only"><label>Adelanto de la subcontrata (%)</label><input type="number" id="pfAdel" class="in" step="0.01" min="0" max="100"></div>
+        <div class="field sub-only"><label>Retención / fondo de garantía (%)</label><input type="number" id="pfRet" class="in" step="0.01" min="0" max="100"></div>
         <div class="field"><label>Presupuesto de referencia (S/)</label><input type="number" id="pfPpto" class="in" step="0.01" min="0"></div>
         <div class="field"><label>Plazo de entrega / contratación (días)</label><input type="number" id="pfPlazo" class="in" step="1" min="0"></div>
         <div class="field"><label>Fecha de requerimiento</label><input type="date" id="pfFReq" class="in"></div>
@@ -97,13 +103,13 @@
         <input type="text" id="pkBuscar" class="in" placeholder="Buscar..." style="flex:1; min-width:160px;">
         <button class="btn secondary" type="button" id="pkCSV">Exportar a Excel (CSV)</button>
       </div>
-      <div style="overflow-x:auto;"><table class="data-table" id="pkTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Paquete</th><th>Frente</th><th>Estado</th><th class="num">Presupuesto ref.</th><th class="num">Comprometido</th><th>Proveedor</th><th>Necesario</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div style="overflow-x:auto;"><table class="data-table" id="pkTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Paquete</th><th>Frente</th><th class="num">Cantidad</th><th>Estado</th><th class="num">Presupuesto ref.</th><th class="num">Comprometido</th><th>Proveedor</th><th>Necesario</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
     </div>
 
     <div class="card" id="cotCard" style="display:none;">
       <h2 id="cotTitulo">Cuadro comparativo</h2>
       <p class="save-hint" id="cotRef"></p>
-      <div style="overflow-x:auto;"><table class="data-table" id="cotTabla"><thead><tr><th>Proveedor</th><th class="num">Monto (S/)</th><th class="num">vs. presupuesto</th><th class="num">Plazo (días)</th><th>Condiciones</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div style="overflow-x:auto;"><table class="data-table" id="cotTabla"><thead><tr><th>Proveedor</th><th class="num">Monto (S/)</th><th class="num">P.U. (S/)</th><th class="num">vs. presupuesto</th><th class="num">Plazo (días)</th><th>Condiciones</th><th></th></tr></thead><tbody></tbody></table></div>
       <form id="cotForm" class="bar" style="margin-top:12px;">
         <input type="text" id="cfProv" class="in" placeholder="Proveedor" required>
         <input type="number" id="cfMonto" class="in" placeholder="Monto (S/)" step="0.01" min="0" required style="width:140px;">
@@ -113,6 +119,102 @@
         <button type="button" class="btn secondary" id="cotCerrar">Cerrar</button>
       </form>
       <div id="cotMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </div>
+  </section>
+
+  <!-- ============ ALMACÉN ============ -->
+  <section class="view" id="view-almacen">
+    <div class="stat-row" id="alStats"></div>
+
+    <form class="card" id="alForm" style="display:none;">
+      <h2 id="alFormTitulo">Registrar movimiento</h2>
+      <div class="grid-f">
+        <div class="field"><label>Tipo</label><select id="amTipo" class="in"><option>Ingreso</option><option>Salida</option></select></div>
+        <div class="field"><label>Fecha</label><input type="date" id="amFecha" class="in" required></div>
+        <div class="field" id="amPaqW"><label>Paquete de procura (opcional)</label><select id="amPaq" class="in"></select></div>
+        <div class="field full"><label>Material</label><input type="text" id="amMat" class="in" list="alMatList" required><datalist id="alMatList"></datalist></div>
+        <div class="field"><label>Unidad</label><input type="text" id="amUnd" class="in" list="lgUndList" required></div>
+        <div class="field"><label>Cantidad</label><input type="number" id="amCant" class="in" step="0.01" min="0.01" required></div>
+        <div class="field"><label id="amDocL">Guía de remisión / documento</label><input type="text" id="amDoc" class="in"></div>
+        <div class="field"><label id="amContL">Proveedor</label><input type="text" id="amCont" class="in"></div>
+        <div class="field" id="amFrW" style="display:none;"><label>Frente / destino</label><select id="amFrente" class="in"></select></div>
+        <div class="field full"><label>Observaciones</label><input type="text" id="amObs" class="in"></div>
+        <div class="field full" style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar movimiento</button>
+          <button type="button" class="btn secondary" id="alCancelar">Cancelar</button>
+        </div>
+      </div>
+      <div id="alMsg" style="color:var(--red); font-size:12.5px;"></div>
+    </form>
+
+    <div class="card">
+      <h2>Stock actual</h2>
+      <div class="bar">
+        <button class="btn" type="button" id="alNuevoIng">+ Recepción (ingreso)</button>
+        <button class="btn secondary" type="button" id="alNuevoSal">− Salida a obra</button>
+        <input type="text" id="alBuscar" class="in" placeholder="Buscar material..." style="flex:1; min-width:160px;">
+        <button class="btn secondary" type="button" id="alCSVStock">Exportar stock (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="alTabStock"><thead><tr><th>Material</th><th>Und</th><th class="num">Ingresos</th><th class="num">Salidas</th><th class="num">Stock</th><th>Último movimiento</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Por recibir (paquetes de materiales)</h2>
+      <p class="save-hint">Paquetes de material ya adjudicados con cantidad definida. Al completar la recepción se ofrece cerrar el paquete.</p>
+      <div style="overflow-x:auto;"><table class="data-table" id="alTabPend"><thead><tr><th>N°</th><th>Material</th><th>Proveedor</th><th class="num">Pedido</th><th class="num">Recibido</th><th class="num">Pendiente</th><th>Avance</th><th>Entrega prevista</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Movimientos</h2>
+      <div class="bar">
+        <select id="alFTipo" class="in"><option value="">Ingresos y salidas</option><option>Ingreso</option><option>Salida</option></select>
+        <button class="btn secondary" type="button" id="alCSVMov">Exportar movimientos (CSV)</button>
+      </div>
+      <div style="overflow-x:auto;"><table class="data-table" id="alTabMov"><thead><tr><th>Fecha</th><th>Tipo</th><th>Material</th><th>Und</th><th class="num">Cantidad</th><th>Documento</th><th>Proveedor / retira</th><th>Frente</th><th>Obs.</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ VALORIZACIONES DE SUBCONTRATAS ============ -->
+  <section class="view" id="view-subvals">
+    <div class="card">
+      <h2>Estado de cuenta por subcontrata</h2>
+      <p class="save-hint">Aparecen los paquetes de tipo Subcontrata ya adjudicados. Contrato = monto comprometido del paquete. Neto = valorización − adelanto amortizado − retención − otros descuentos.</p>
+      <div style="overflow-x:auto;"><table class="data-table" id="svResumen"><thead><tr><th>N°</th><th>Subcontrata</th><th>Proveedor</th><th class="num">Contrato (S/)</th><th class="num">Valorizado (S/)</th><th class="num">% avance</th><th class="num">Saldo (S/)</th><th class="num">Retenido (S/)</th><th class="num">Pagado neto (S/)</th><th class="num">Por pagar (S/)</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card" id="svCard" style="display:none;">
+      <h2 id="svTitulo"></h2>
+      <p class="save-hint" id="svRef"></p>
+      <div style="overflow-x:auto;"><table class="data-table" id="svTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Periodo</th><th>Descripción</th><th class="num">Bruto</th><th class="num">(−) Adelanto</th><th class="num">(−) Retención</th><th class="num">(−) Otros</th><th class="num">Neto</th><th class="num">IGV 18 %</th><th class="num">Total</th><th>Estado</th><th>Factura</th><th>Pago</th><th></th></tr></thead><tbody></tbody></table></div>
+      <form id="svForm" style="margin-top:14px; display:none;">
+        <h3 id="svFormTitulo" style="font-size:14px; margin:0 0 8px;">Nueva valorización</h3>
+        <div class="grid-f">
+          <div class="field"><label>Tipo</label><select id="svTipo" class="in"><option>Valorización</option><option>Liberación de retención</option></select></div>
+          <div class="field"><label>Periodo</label><input type="month" id="svPeriodo" class="in"></div>
+          <div class="field full"><label>Descripción / partidas valorizadas</label><input type="text" id="svDesc" class="in"></div>
+          <div class="field"><label id="svBrutoL">Monto bruto valorizado (S/)</label><input type="number" id="svBruto" class="in" step="0.01" min="0" required></div>
+          <div class="field sv-desc"><label>Adelanto amortizado (S/)</label><input type="number" id="svAmort" class="in" step="0.01" min="0"></div>
+          <div class="field sv-desc"><label>Retención / fondo de garantía (S/)</label><input type="number" id="svRet" class="in" step="0.01" min="0"></div>
+          <div class="field sv-desc"><label>Otros descuentos (S/)</label><input type="number" id="svOtros" class="in" step="0.01" min="0"></div>
+          <div class="field"><label>Estado</label><select id="svEstado" class="in"><option>Presentada</option><option>Aprobada</option><option>Pagada</option></select></div>
+          <div class="field"><label>N° de factura</label><input type="text" id="svFactura" class="in"></div>
+          <div class="field"><label>Fecha de presentación</label><input type="date" id="svFPres" class="in"></div>
+          <div class="field"><label>Fecha de pago</label><input type="date" id="svFPago" class="in"></div>
+          <div class="field full"><label>Observaciones</label><input type="text" id="svObs" class="in"></div>
+        </div>
+        <p id="svNeto" style="font-size:13px; font-weight:600; margin:6px 0;"></p>
+        <div style="display:flex; gap:8px;">
+          <button type="submit" class="btn">Guardar</button>
+          <button type="button" class="btn secondary" id="svCancelar">Cancelar</button>
+        </div>
+        <div id="svMsg" style="color:var(--red); font-size:12.5px;"></div>
+      </form>
+      <div class="bar" style="margin-top:12px;">
+        <button class="btn" type="button" id="svNueva">+ Nueva valorización</button>
+        <button class="btn secondary" type="button" id="svCerrarSub" style="display:none;">Cerrar subcontrata</button>
+        <button class="btn secondary" type="button" id="svCSV">Exportar (CSV)</button>
+        <button class="btn secondary" type="button" id="svCerrar">Cerrar panel</button>
+      </div>
     </div>
   </section>
 </main>
