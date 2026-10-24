@@ -147,6 +147,8 @@ async function onProyectoChange(idElegido) {
   await loadRestricciones(proyectoId);
   if (CURRENT_PROFILE.rol === "admin") await renderUsuariosTab(proyectoId);
   if (CURRENT_PROFILE.rol === "admin" || CURRENT_PROFILE.rol === "planner") await renderLineasBaseTab(proyectoId);
+  if (window.OBRA_HOOKS) window.OBRA_HOOKS.forEach(f => { try { f(); } catch (e) { console.error(e); } });
+  if (window.refrescarGrupos) window.refrescarGrupos();
 }
 
 // Supabase devuelve como maximo 1000 filas por consulta. Esta funcion pide paginas de 1000
