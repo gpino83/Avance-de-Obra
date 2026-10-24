@@ -179,7 +179,7 @@
     <div class="stat-row" id="pgStats"></div>
     <div class="card">
       <h2>Estado de pagos por paquete</h2>
-      <p class="save-hint">Materiales: se registran aquí las facturas y sus pagos. Subcontratas: los datos vienen de las valorizaciones registradas en Control de Obra (Costos &gt; Subcontratas), solo lectura. Comprometido va sin IGV; facturado y pagado incluyen IGV (18 %).</p>
+      <p class="save-hint">Consulta de solo lectura: los datos vienen de lo registrado en Control de Obra (Costos &gt; Procuras y Subcontratas). Comprometido va sin IGV; facturado y pagado incluyen IGV (18 %).</p>
       <div class="bar">
         <select id="pgFTipo" class="in"><option value="">Materiales y subcontratas</option><option>Material</option><option>Subcontrata</option></select>
         <button class="btn secondary" type="button" id="pgCSV">Exportar (CSV)</button>
@@ -187,18 +187,9 @@
       <div style="overflow-x:auto;"><table class="data-table" id="pgTabla"><thead><tr><th>N°</th><th>Tipo</th><th>Paquete</th><th>Proveedor</th><th class="num">Comprometido (S/)</th><th class="num">Facturado (S/)</th><th class="num">Pagado (S/)</th><th class="num">Por pagar (S/)</th><th class="num">Sin facturar (S/)</th><th>Alerta</th><th></th></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="card" id="pgCard" style="display:none;">
-      <h2 id="pgTitulo"></h2>
-      <div style="overflow-x:auto;"><table class="data-table" id="pgDet"><thead><tr><th>Factura</th><th>Fecha</th><th class="num">Monto (S/)</th><th>Vencimiento</th><th>Estado</th><th>Fecha de pago</th><th>Obs.</th><th></th></tr></thead><tbody></tbody></table></div>
-      <form id="pgForm" class="bar" style="margin-top:12px;">
-        <input type="text" id="pfFact" class="in" placeholder="N° de factura" style="width:140px;">
-        <input type="date" id="pfFFact" class="in" title="Fecha de factura">
-        <input type="number" id="pfMontoF" class="in" placeholder="Monto total (S/)" step="0.01" min="0" required style="width:150px;">
-        <input type="date" id="pfFVenc" class="in" title="Vencimiento">
-        <input type="text" id="pfObsF" class="in" placeholder="Observaciones" style="flex:1; min-width:140px;">
-        <button type="submit" class="btn">Agregar factura</button>
-        <button type="button" class="btn secondary" id="pgCerrar">Cerrar</button>
-      </form>
-      <div id="pgMsg" style="color:var(--red); font-size:12.5px;"></div>
+      <h2 id="pgTitulo"></h2><div class="bar"><button class="btn secondary mini" type="button" onclick="this.closest('.card').style.display='none'">Cerrar</button></div>
+      <div style="overflow-x:auto;"><table class="data-table" id="pgDet"><thead><tr><th>Factura</th><th>Fecha</th><th class="num">Monto (S/)</th><th>Vencimiento</th><th>Estado</th><th>Fecha de pago</th><th>Obs.</th></tr></thead><tbody></tbody></table></div>
+      <p class="save-hint" style="margin-top:10px;">Las facturas y pagos se registran en Control de Obra (Costos &gt; Procuras y Subcontratas).</p>
     </div>
   </section>
 </main>
